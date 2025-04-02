@@ -4,8 +4,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-// Update the Vehicle class in Models/Vehicle.cs
-
 namespace claudpro.Models
 {
     public class Vehicle
@@ -14,17 +12,24 @@ namespace claudpro.Models
         public int Capacity { get; set; }
         public double StartLatitude { get; set; }
         public double StartLongitude { get; set; }
-        public string StartAddress { get; set; }  // Add this property
+        public string StartAddress { get; set; }
         public List<Passenger> AssignedPassengers { get; set; } = new List<Passenger>();
         public double TotalDistance { get; set; }
         public double TotalTime { get; set; }
 
+        // New properties for database integration
+        public int UserId { get; set; }
+        public string DriverName { get; set; }
+        public bool IsAvailableTomorrow { get; set; } = true;
+
         public override string ToString()
         {
-            if (!string.IsNullOrEmpty(StartAddress))
-                return $"Vehicle {Id} (Capacity: {Capacity}, {StartAddress})";
+            string displayName = !string.IsNullOrEmpty(DriverName) ? DriverName : $"Vehicle {Id}";
 
-            return $"Vehicle {Id} (Capacity: {Capacity})";
+            if (!string.IsNullOrEmpty(StartAddress))
+                return $"{displayName} (Capacity: {Capacity}, {StartAddress})";
+
+            return $"{displayName} (Capacity: {Capacity})";
         }
     }
 }

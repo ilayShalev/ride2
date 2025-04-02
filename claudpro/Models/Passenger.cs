@@ -4,8 +4,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-// Update the Passenger class in Models/Passenger.cs
-
 namespace claudpro.Models
 {
     public class Passenger
@@ -14,7 +12,12 @@ namespace claudpro.Models
         public string Name { get; set; }
         public double Latitude { get; set; }
         public double Longitude { get; set; }
-        public string Address { get; set; }  // Add this property
+        public string Address { get; set; }
+
+        // New properties for database integration
+        public int UserId { get; set; }
+        public bool IsAvailableTomorrow { get; set; } = true;
+        public string EstimatedPickupTime { get; set; }
 
         public override string ToString()
         {
