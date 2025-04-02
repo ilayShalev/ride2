@@ -1,4 +1,6 @@
-﻿namespace claudpro
+﻿using System;
+
+namespace claudpro
 {
     partial class PassengerForm
     {
@@ -43,5 +45,11 @@
         }
 
         #endregion
+
+
+        private void PassengerForm_Load(object sender, EventArgs e)
+        {
+            // Initialization code for Passenger
+        }
     }
 }

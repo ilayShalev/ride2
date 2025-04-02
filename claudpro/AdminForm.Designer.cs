@@ -1,4 +1,6 @@
-﻿namespace claudpro
+﻿using System;
+
+namespace claudpro
 {
     partial class AdminForm
     {
@@ -43,5 +45,10 @@
         }
 
         #endregion
+
+        private void AdminForm_Load(object sender, EventArgs e)
+        {
+            // Initialization code for AdminForm
+        }
     }
 }

@@ -983,7 +983,12 @@ namespace claudpro.Services
                 }
             }
 
-            DateTime? pickupDateTime = pickupTime != null ? DateTime.Parse(pickupTime) : null;
+
+            DateTime? pickupDateTime = null;
+            if (pickupTime != null)
+            {
+                pickupDateTime = DateTime.Parse(pickupTime);
+            }
             return (vehicle, pickupDateTime);
         }
 

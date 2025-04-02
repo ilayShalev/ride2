@@ -27,19 +27,7 @@ namespace claudpro
             SetupUI();
         }
 
-        private void InitializeComponent()
-        {
-            this.SuspendLayout();
-
-            this.Text = "RideMatch - Login";
-            this.Size = new Size(400, 300);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.StartPosition = FormStartPosition.CenterScreen;
-
-            this.ResumeLayout(false);
-        }
+      
 
         private void SetupUI()
         {
@@ -148,6 +136,10 @@ namespace claudpro
                     statusLabel.Text = "Registration successful! You can now login.";
                 }
             }
+        }
+        private void LoginForm_Load(object sender, EventArgs e)
+        {
+            // Initialization code for LoginForm
         }
     }
 
@@ -367,4 +359,5 @@ namespace claudpro
             return true;
         }
     }
+
 }

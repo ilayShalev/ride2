@@ -1,4 +1,6 @@
-﻿namespace claudpro
+﻿using System;
+
+namespace claudpro
 {
     partial class DriverForm
     {
@@ -43,5 +45,11 @@
         }
 
         #endregion
+
+        private void DriverForm_Load(object sender, EventArgs e)
+        {
+            // Initialization code for DriverForm
+        }
     }
+
 }
