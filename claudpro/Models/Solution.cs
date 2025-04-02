@@ -10,6 +10,7 @@ namespace claudpro.Models
     {
         public List<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
         public double Score { get; set; }
+        // Update the Clone method in Models/Solution.cs to handle the new address properties
 
         public Solution Clone()
         {
@@ -28,6 +29,7 @@ namespace claudpro.Models
                     Capacity = vehicle.Capacity,
                     StartLatitude = vehicle.StartLatitude,
                     StartLongitude = vehicle.StartLongitude,
+                    StartAddress = vehicle.StartAddress, // Include address in clone
                     AssignedPassengers = new List<Passenger>(vehicle.AssignedPassengers),
                     TotalDistance = vehicle.TotalDistance,
                     TotalTime = vehicle.TotalTime

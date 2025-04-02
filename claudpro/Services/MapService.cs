@@ -31,7 +31,7 @@ namespace claudpro.Services
         /// <summary>
         /// Initializes the Google Maps component
         /// </summary>
-        public void InitializeGoogleMaps(GMapControl mapControl, double latitude = 40.7128, double longitude = -74.0060)
+        public void InitializeGoogleMaps(GMapControl mapControl, double latitude = 32.0853, double longitude = 34.7818)
         {
             GMaps.Instance.Mode = AccessMode.ServerAndCache;
             GoogleMapProvider.Instance.ApiKey = apiKey;
@@ -270,6 +270,71 @@ namespace claudpro.Services
         public void Dispose()
         {
             httpClient?.Dispose();
+        }
+
+
+        // Add this method to the MapService class in MapService.cs
+
+        /// <summary>
+        /// Geocodes an address string to latitude and longitude coordinates
+        /// </summary>
+        /// <param name="address">The address to geocode</param>
+        /// <returns>A tuple with latitude and longitude if successful, null if failed</returns>
+        public async Task<(double Latitude, double Longitude)?> GeocodeAddressAsync(string address)
+        {
+            if (string.IsNullOrWhiteSpace(address)) return null;
+
+            try
+            {
+                // URL encode the address
+                string encodedAddress = Uri.EscapeDataString(address);
+                string url = $"https://maps.googleapis.com/maps/api/geocode/json?address={encodedAddress}&key={apiKey}";
+
+                var response = await httpClient.GetStringAsync(url);
+                dynamic data = JsonConvert.DeserializeObject(response);
+
+                if (data.status.ToString() != "OK" || data.results.Count == 0)
+                {
+                    return null;
+                }
+
+                double lat = Convert.ToDouble(data.results[0].geometry.location.lat);
+                double lng = Convert.ToDouble(data.results[0].geometry.location.lng);
+
+                return (lat, lng);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets a formatted address from coordinates (reverse geocoding)
+        /// </summary>
+        /// <param name="latitude">The latitude</param>
+        /// <param name="longitude">The longitude</param>
+        /// <returns>A formatted address string if successful, null if failed</returns>
+        public async Task<string> ReverseGeocodeAsync(double latitude, double longitude)
+        {
+            try
+            {
+                string url = $"https://maps.googleapis.com/maps/api/geocode/json?latlng={latitude},{longitude}&key={apiKey}";
+
+                var response = await httpClient.GetStringAsync(url);
+                dynamic data = JsonConvert.DeserializeObject(response);
+
+                if (data.status.ToString() != "OK" || data.results.Count == 0)
+                {
+                    return null;
+                }
+
+                return data.results[0].formatted_address.ToString();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
     }
 }

@@ -16,11 +16,11 @@ namespace claudpro
     public partial class MainForm : Form
     {
         // Configuration
-        private const string API_KEY = "YOUR_GOOGLE_MAPS_API_KEY"; // Replace with actual API key
+        private const string API_KEY = "AIzaSyA8gY0PbmE1EgDjxd-SdIMWWTaQf9Mi7vc"; //  actual API key
 
         // Services
-        private readonly MapService mapService;
-        private readonly RoutingService routingService;
+        private  MapService mapService;
+        private  RoutingService routingService;
 
         // Data
         private List<Passenger> passengers = new List<Passenger>();
@@ -29,8 +29,8 @@ namespace claudpro
         private List<Solution> evaluatedPopulation = new List<Solution>();
 
         // State
-        private double destinationLat = 40.7500; // Times Square, NY
-        private double destinationLng = -73.9900;
+        private double destinationLat = 32.0741; //TEL - AVIV   
+        private double destinationLng = 34.7922;
         private int targetTime = 30;
         private Random rnd = new Random();
         private bool isAddingManually = false;
@@ -44,6 +44,9 @@ namespace claudpro
 
         // Control fields
         private TextBox latTextBox, lngTextBox, nameTextBox, capacityTextBox, destLatTextBox, destLngTextBox;
+        private TextBox addressTextBox, destAddressTextBox;
+        private Button searchAddressButton, searchDestAddressButton;
+        private CheckBox useAddressCheckBox;
         private RadioButton passengerRadio, vehicleRadio;
         private Button addButton, clearButton;
         private NumericUpDown numPassengersUpDown, numVehiclesUpDown, generationsUpDown, populationSizeUpDown;
@@ -169,10 +172,30 @@ namespace claudpro
                 destinationLng.ToString()
             );
             controlPanel.Controls.Add(destLngTextBox);
+            y += 30;
+
+            // Add destination address input
+            controlPanel.Controls.Add(ControlExtensions.CreateLabel("- OR -", new Point(140, y), new Size(100, 20),
+                new Font("Arial", 9, FontStyle.Bold), ContentAlignment.MiddleCenter));
+            y += 25;
+
+            controlPanel.Controls.Add(ControlExtensions.CreateLabel("Address:", new Point(10, y), new Size(80, 20)));
+            destAddressTextBox = ControlExtensions.CreateTextBox(new Point(100, y), new Size(180, 25));
+            controlPanel.Controls.Add(destAddressTextBox);
+            y += 30;
+
+            searchDestAddressButton = ControlExtensions.CreateButton(
+                "Search Destination",
+                new Point(100, y),
+                new Size(180, 30),
+                SearchDestAddressButton_Click
+            );
+            controlPanel.Controls.Add(searchDestAddressButton);
+            y += 30;
 
             Button setDestButton = ControlExtensions.CreateButton(
                 "Set Destination",
-                new Point(100, y + 30),
+                new Point(100, y),
                 new Size(180, 30),
                 SetDestButton_Click
             );
@@ -207,6 +230,31 @@ namespace claudpro
             lngTextBox = ControlExtensions.CreateTextBox(new Point(100, y), new Size(180, 25));
             controlPanel.Controls.Add(lngTextBox);
             y += 30;
+
+            // Add address input option
+            controlPanel.Controls.Add(ControlExtensions.CreateLabel("- OR -", new Point(140, y), new Size(100, 20),
+                new Font("Arial", 9, FontStyle.Bold), ContentAlignment.MiddleCenter));
+            y += 25;
+
+            // Add address input field
+            useAddressCheckBox = ControlExtensions.CreateCheckBox("Use Address:", new Point(10, y), new Size(100, 20), false);
+            useAddressCheckBox.CheckedChanged += UseAddressCheckBox_CheckedChanged;
+            controlPanel.Controls.Add(useAddressCheckBox);
+
+            addressTextBox = ControlExtensions.CreateTextBox(new Point(100, y), new Size(180, 25));
+            addressTextBox.Enabled = false;
+            controlPanel.Controls.Add(addressTextBox);
+            y += 30;
+
+            searchAddressButton = ControlExtensions.CreateButton(
+                "Search Address",
+                new Point(100, y),
+                new Size(180, 30),
+                SearchAddressButton_Click
+            );
+            searchAddressButton.Enabled = false;
+            controlPanel.Controls.Add(searchAddressButton);
+            y += 40;
 
             // Name / Capacity field
             var dynamicLabel = ControlExtensions.CreateLabel("Name:", new Point(10, y), new Size(80, 20));
@@ -453,13 +501,24 @@ namespace claudpro
             capacityTextBox.Visible = !isAddingPassenger;
         }
 
-        private void GMapControl_MouseClick(object sender, MouseEventArgs e)
+        // Update the GMapControl_MouseClick method to include reverse geocoding
+        private async void GMapControl_MouseClick(object sender, MouseEventArgs e)
         {
             if (!isAddingManually) return;
 
             PointLatLng point = gMapControl.FromLocalToLatLng(e.X, e.Y);
             latTextBox.Text = point.Lat.ToString();
             lngTextBox.Text = point.Lng.ToString();
+
+            // If address search is enabled, try to get the address
+            if (useAddressCheckBox.Checked)
+            {
+                string address = await mapService.ReverseGeocodeAsync(point.Lat, point.Lng);
+                if (!string.IsNullOrEmpty(address))
+                {
+                    addressTextBox.Text = address;
+                }
+            }
 
             if (isAddingPassenger)
                 AddPassenger();
@@ -474,29 +533,224 @@ namespace claudpro
             mapService.ChangeMapProvider(gMapControl, mapTypeComboBox.SelectedIndex);
         }
 
+        private void UseAddressCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            // Toggle between address and coordinates input
+            bool useAddress = useAddressCheckBox.Checked;
+
+            latTextBox.Enabled = !useAddress;
+            lngTextBox.Enabled = !useAddress;
+            addressTextBox.Enabled = useAddress;
+            searchAddressButton.Enabled = useAddress;
+        }
+
+        private async void SearchAddressButton_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(addressTextBox.Text))
+            {
+                MessageBox.Show("Please enter an address to search", "Invalid Address", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                searchAddressButton.Enabled = false;
+                Log($"Searching for address: {addressTextBox.Text}");
+
+                var result = await mapService.GeocodeAddressAsync(addressTextBox.Text);
+                if (result.HasValue)
+                {
+                    latTextBox.Text = result.Value.Latitude.ToString();
+                    lngTextBox.Text = result.Value.Longitude.ToString();
+
+                    Log($"Address found: {addressTextBox.Text} => {result.Value.Latitude}, {result.Value.Longitude}");
+
+                    // Center map on found location
+                    gMapControl.Position = new PointLatLng(result.Value.Latitude, result.Value.Longitude);
+
+                    // Create a temporary marker to show the found location
+                    var overlay = new GMap.NET.WindowsForms.GMapOverlay("searchResult");
+                    var marker = new GMap.NET.WindowsForms.Markers.GMarkerGoogle(
+                        new PointLatLng(result.Value.Latitude, result.Value.Longitude),
+                        GMap.NET.WindowsForms.Markers.GMarkerGoogleType.yellow);
+                    overlay.Markers.Add(marker);
+                    gMapControl.Overlays.Add(overlay);
+
+                    // Remove the marker after 5 seconds
+                    System.Threading.Tasks.Task.Delay(5000).ContinueWith(t =>
+                    {
+                        if (IsDisposed) return;
+
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            gMapControl.Overlays.Remove(overlay);
+                            gMapControl.Refresh();
+                        }));
+                    });
+                }
+                else
+                {
+                    MessageBox.Show($"Could not find the address: {addressTextBox.Text}",
+                        "Address Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error searching for address: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+                searchAddressButton.Enabled = true;
+            }
+        }
+
+        private async void SearchDestAddressButton_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(destAddressTextBox.Text))
+            {
+                MessageBox.Show("Please enter an address to search", "Invalid Address", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                Cursor = Cursors.WaitCursor;
+                searchDestAddressButton.Enabled = false;
+                Log($"Searching for destination address: {destAddressTextBox.Text}");
+
+                var result = await mapService.GeocodeAddressAsync(destAddressTextBox.Text);
+                if (result.HasValue)
+                {
+                    destLatTextBox.Text = result.Value.Latitude.ToString();
+                    destLngTextBox.Text = result.Value.Longitude.ToString();
+
+                    Log($"Destination address found: {destAddressTextBox.Text} => {result.Value.Latitude}, {result.Value.Longitude}");
+
+                    // Center map on found location
+                    gMapControl.Position = new PointLatLng(result.Value.Latitude, result.Value.Longitude);
+
+                    // Create a temporary marker to show the found location
+                    var overlay = new GMap.NET.WindowsForms.GMapOverlay("destSearchResult");
+                    var marker = new GMap.NET.WindowsForms.Markers.GMarkerGoogle(
+                        new PointLatLng(result.Value.Latitude, result.Value.Longitude),
+                        GMap.NET.WindowsForms.Markers.GMarkerGoogleType.orange);
+                    overlay.Markers.Add(marker);
+                    gMapControl.Overlays.Add(overlay);
+
+                    // Remove the marker after 5 seconds
+                    System.Threading.Tasks.Task.Delay(5000).ContinueWith(t =>
+                    {
+                        if (IsDisposed) return;
+
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            gMapControl.Overlays.Remove(overlay);
+                            gMapControl.Refresh();
+                        }));
+                    });
+                }
+                else
+                {
+                    MessageBox.Show($"Could not find the address: {destAddressTextBox.Text}",
+                        "Address Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error searching for address: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+                searchDestAddressButton.Enabled = true;
+            }
+        }
+
         #endregion
 
         #region Data Operations
+        // Update the AddPassenger and AddVehicle methods in MainForm.cs
 
-        private void AddPassenger()
+        private async void AddPassenger()
         {
             try
             {
-                double lat = double.Parse(latTextBox.Text);
-                double lng = double.Parse(lngTextBox.Text);
+                double lat, lng;
+                string address = null;
+
+                if (useAddressCheckBox.Checked)
+                {
+                    if (string.IsNullOrWhiteSpace(addressTextBox.Text))
+                    {
+                        MessageBox.Show("Please enter an address or search for one first.",
+                            "Missing Address", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(latTextBox.Text) || string.IsNullOrWhiteSpace(lngTextBox.Text))
+                    {
+                        MessageBox.Show("Please search for the address to get coordinates.",
+                            "Missing Coordinates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    lat = double.Parse(latTextBox.Text);
+                    lng = double.Parse(lngTextBox.Text);
+                    address = addressTextBox.Text;
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(latTextBox.Text) || string.IsNullOrWhiteSpace(lngTextBox.Text))
+                    {
+                        MessageBox.Show("Please enter latitude and longitude coordinates.",
+                            "Missing Coordinates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    lat = double.Parse(latTextBox.Text);
+                    lng = double.Parse(lngTextBox.Text);
+
+                    // Get the address for these coordinates if possible
+                    address = await mapService.ReverseGeocodeAsync(lat, lng);
+                }
 
                 if (!GeoCalculator.IsValidLocation(lat, lng))
                 {
-                    MessageBox.Show("The location is invalid or in water.", "Invalid Location", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("The location is invalid or in water.",
+                        "Invalid Location", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
                 string name = string.IsNullOrEmpty(nameTextBox.Text) ? $"P{passengers.Count}" : nameTextBox.Text;
-                passengers.Add(new Passenger { Id = passengers.Count, Name = name, Latitude = lat, Longitude = lng });
+                passengers.Add(new Passenger
+                {
+                    Id = passengers.Count,
+                    Name = name,
+                    Latitude = lat,
+                    Longitude = lng,
+                    Address = address
+                });
 
                 routingService.DisplayDataOnMap(gMapControl, passengers, vehicles);
-                Log($"Added passenger {name} at {lat}, {lng}");
+
+                string locationInfo = address != null
+                    ? $"at {address}"
+                    : $"at {lat}, {lng}";
+
+                Log($"Added passenger {name} {locationInfo}");
+
+                // Clear inputs
                 nameTextBox.Text = "";
+                if (useAddressCheckBox.Checked)
+                {
+                    addressTextBox.Text = "";
+                }
+                latTextBox.Text = "";
+                lngTextBox.Text = "";
             }
             catch (Exception ex)
             {
@@ -504,23 +758,61 @@ namespace claudpro
             }
         }
 
-        private void AddVehicle()
+        private async void AddVehicle()
         {
             try
             {
-                double lat = double.Parse(latTextBox.Text);
-                double lng = double.Parse(lngTextBox.Text);
-                int capacity = int.Parse(capacityTextBox.Text);
+                double lat, lng;
+                string address = null;
 
-                if (!GeoCalculator.IsValidLocation(lat, lng))
+                if (useAddressCheckBox.Checked)
                 {
-                    MessageBox.Show("The location is invalid or in water.", "Invalid Location", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (string.IsNullOrWhiteSpace(addressTextBox.Text))
+                    {
+                        MessageBox.Show("Please enter an address or search for one first.",
+                            "Missing Address", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(latTextBox.Text) || string.IsNullOrWhiteSpace(lngTextBox.Text))
+                    {
+                        MessageBox.Show("Please search for the address to get coordinates.",
+                            "Missing Coordinates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    lat = double.Parse(latTextBox.Text);
+                    lng = double.Parse(lngTextBox.Text);
+                    address = addressTextBox.Text;
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(latTextBox.Text) || string.IsNullOrWhiteSpace(lngTextBox.Text))
+                    {
+                        MessageBox.Show("Please enter latitude and longitude coordinates.",
+                            "Missing Coordinates", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    lat = double.Parse(latTextBox.Text);
+                    lng = double.Parse(lngTextBox.Text);
+
+                    // Get the address for these coordinates if possible
+                    address = await mapService.ReverseGeocodeAsync(lat, lng);
+                }
+
+                int capacity;
+                if (!int.TryParse(capacityTextBox.Text, out capacity) || capacity < 1)
+                {
+                    MessageBox.Show("Capacity must be at least 1.",
+                        "Invalid Capacity", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
-                if (capacity < 1)
+                if (!GeoCalculator.IsValidLocation(lat, lng))
                 {
-                    MessageBox.Show("Capacity must be at least 1.", "Invalid Capacity", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("The location is invalid or in water.",
+                        "Invalid Location", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
@@ -529,12 +821,26 @@ namespace claudpro
                     Id = vehicles.Count,
                     Capacity = capacity,
                     StartLatitude = lat,
-                    StartLongitude = lng
+                    StartLongitude = lng,
+                    StartAddress = address
                 });
 
                 routingService.DisplayDataOnMap(gMapControl, passengers, vehicles);
-                Log($"Added vehicle with capacity {capacity} at {lat}, {lng}");
+
+                string locationInfo = address != null
+                    ? $"at {address}"
+                    : $"at {lat}, {lng}";
+
+                Log($"Added vehicle with capacity {capacity} {locationInfo}");
+
+                // Clear inputs
                 capacityTextBox.Text = "4";
+                if (useAddressCheckBox.Checked)
+                {
+                    addressTextBox.Text = "";
+                }
+                latTextBox.Text = "";
+                lngTextBox.Text = "";
             }
             catch (Exception ex)
             {
@@ -667,6 +973,8 @@ namespace claudpro
 
         #region UI Utilities
 
+        // Update the UpdateRouteDetailsDisplay method in MainForm.cs
+
         private void UpdateRouteDetailsDisplay()
         {
             routeDetailsTextBox.Clear();
@@ -680,9 +988,16 @@ namespace claudpro
 
             foreach (var detail in routingService.VehicleRouteDetails.Values.OrderBy(d => d.VehicleId))
             {
+                // Get vehicle info
+                var vehicle = vehicles.FirstOrDefault(v => v.Id == detail.VehicleId);
+                string startLocation = vehicle != null && !string.IsNullOrEmpty(vehicle.StartAddress)
+                    ? vehicle.StartAddress
+                    : $"({vehicle?.StartLatitude ?? 0:F4}, {vehicle?.StartLongitude ?? 0:F4})";
+
                 routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                 routeDetailsTextBox.AppendText($"Vehicle {detail.VehicleId}\n");
                 routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                routeDetailsTextBox.AppendText($"Start Location: {startLocation}\n");
                 routeDetailsTextBox.AppendText($"Total Distance: {detail.TotalDistance:F2} km\n");
                 routeDetailsTextBox.AppendText($"Total Time: {detail.TotalTime:F2} min\n\n");
 
@@ -693,8 +1008,29 @@ namespace claudpro
                 int stopNumber = 1;
                 foreach (var stop in detail.StopDetails)
                 {
-                    string stopName = stop.PassengerId < 0 ? "Destination" : $"Passenger {stop.PassengerName}";
-                    routeDetailsTextBox.AppendText($"{stopNumber}. {stopName}\n");
+                    // For stops that are passengers
+                    if (stop.PassengerId >= 0)
+                    {
+                        var passenger = passengers.FirstOrDefault(p => p.Id == stop.PassengerId);
+                        string stopName = $"Passenger {stop.PassengerName}";
+                        string stopLocation = passenger != null && !string.IsNullOrEmpty(passenger.Address)
+                            ? passenger.Address
+                            : $"({passenger?.Latitude ?? 0:F4}, {passenger?.Longitude ?? 0:F4})";
+
+                        routeDetailsTextBox.AppendText($"{stopNumber}. {stopName}\n");
+                        routeDetailsTextBox.AppendText($"   Location: {stopLocation}\n");
+                    }
+                    else // For destination stop
+                    {
+                        string stopName = "Destination";
+                        string stopLocation = !string.IsNullOrEmpty(destAddressTextBox?.Text)
+                            ? destAddressTextBox.Text
+                            : $"({destinationLat:F4}, {destinationLng:F4})";
+
+                        routeDetailsTextBox.AppendText($"{stopNumber}. {stopName}\n");
+                        routeDetailsTextBox.AppendText($"   Location: {stopLocation}\n");
+                    }
+
                     routeDetailsTextBox.AppendText($"   Distance: {stop.DistanceFromPrevious:F2} km\n");
                     routeDetailsTextBox.AppendText($"   Time: {stop.TimeFromPrevious:F2} min\n");
                     routeDetailsTextBox.AppendText($"   Cumulative: {stop.CumulativeDistance:F2} km, {stop.CumulativeTime:F2} min\n\n");
@@ -712,3 +1048,4 @@ namespace claudpro
 
         #endregion
     }
+}
