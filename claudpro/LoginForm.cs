@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using claudpro.Services;
 using claudpro.UI;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel;
 
 namespace claudpro
 {
@@ -15,7 +14,6 @@ namespace claudpro
         private TextBox passwordTextBox;
         private Button loginButton;
         private LinkLabel registerLinkLabel;
-        private ComboBox userTypeComboBox;
         private Label statusLabel;
 
         public int UserId { get; private set; }
@@ -91,6 +89,194 @@ namespace claudpro
                 "",
                 new Point(50, 220),
                 new Size(300, 20),
+                null,
+                ContentAlignment.MiddleCenter
+            );
+            statusLabel.ForeColor = Color.Red;
+            Controls.Add(statusLabel);
+
+            // Set enter key to trigger login
+            AcceptButton = loginButton;
+        }
+
+        private async Task LoginAsync()
+        {
+            loginButton.Enabled = false;
+            statusLabel.Text = "Logging in...";
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(usernameTextBox.Text) || string.IsNullOrWhiteSpace(passwordTextBox.Text))
+                {
+                    statusLabel.Text = "Please enter both username and password.";
+                    return;
+                }
+
+                var result = await dbService.AuthenticateUserAsync(usernameTextBox.Text, passwordTextBox.Text);
+
+                if (result.Success)
+                {
+                    UserId = result.UserId;
+                    UserType = result.UserType;
+                    Username = usernameTextBox.Text;
+
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
+                else
+                {
+                    statusLabel.Text = "Invalid username or password.";
+                }
+            }
+            catch (Exception ex)
+            {
+                statusLabel.Text = $"Error: {ex.Message}";
+            }
+            finally
+            {
+                loginButton.Enabled = true;
+            }
+        }
+
+        private void ShowRegistrationForm()
+        {
+            using (var regForm = new RegistrationForm(dbService))
+            {
+                if (regForm.ShowDialog() == DialogResult.OK)
+                {
+                    usernameTextBox.Text = regForm.Username;
+                    statusLabel.Text = "Registration successful! You can now login.";
+                }
+            }
+        }
+    }
+
+    public class RegistrationForm : Form
+    {
+        private readonly DatabaseService dbService;
+        private TextBox usernameTextBox;
+        private TextBox passwordTextBox;
+        private TextBox confirmPasswordTextBox;
+        private TextBox nameTextBox;
+        private TextBox emailTextBox;
+        private TextBox phoneTextBox;
+        private ComboBox userTypeComboBox;
+        private Button registerButton;
+        private Button cancelButton;
+        private Label statusLabel;
+
+        public string Username { get; private set; }
+
+        public RegistrationForm(DatabaseService dbService)
+        {
+            this.dbService = dbService;
+            InitializeComponent();
+            SetupUI();
+        }
+
+        private void InitializeComponent()
+        {
+            this.SuspendLayout();
+
+            this.Text = "RideMatch - Registration";
+            this.Size = new Size(450, 400);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.StartPosition = FormStartPosition.CenterParent;
+
+            this.ResumeLayout(false);
+        }
+
+        private void SetupUI()
+        {
+            // Title
+            var titleLabel = ControlExtensions.CreateLabel(
+                "New User Registration",
+                new Point(50, 20),
+                new Size(350, 30),
+                new Font("Arial", 16, FontStyle.Bold),
+                ContentAlignment.MiddleCenter
+            );
+            Controls.Add(titleLabel);
+
+            int y = 70;
+            int labelWidth = 120;
+            int inputWidth = 230;
+            int spacing = 30;
+
+            // Username
+            Controls.Add(ControlExtensions.CreateLabel("Username:", new Point(50, y), new Size(labelWidth, 20)));
+            usernameTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
+            Controls.Add(usernameTextBox);
+            y += spacing;
+
+            // Password
+            Controls.Add(ControlExtensions.CreateLabel("Password:", new Point(50, y), new Size(labelWidth, 20)));
+            passwordTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
+            passwordTextBox.PasswordChar = '*';
+            Controls.Add(passwordTextBox);
+            y += spacing;
+
+            // Confirm Password
+            Controls.Add(ControlExtensions.CreateLabel("Confirm Password:", new Point(50, y), new Size(labelWidth, 20)));
+            confirmPasswordTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
+            confirmPasswordTextBox.PasswordChar = '*';
+            Controls.Add(confirmPasswordTextBox);
+            y += spacing;
+
+            // Name
+            Controls.Add(ControlExtensions.CreateLabel("Name:", new Point(50, y), new Size(labelWidth, 20)));
+            nameTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
+            Controls.Add(nameTextBox);
+            y += spacing;
+
+            // Email
+            Controls.Add(ControlExtensions.CreateLabel("Email:", new Point(50, y), new Size(labelWidth, 20)));
+            emailTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
+            Controls.Add(emailTextBox);
+            y += spacing;
+
+            // Phone
+            Controls.Add(ControlExtensions.CreateLabel("Phone:", new Point(50, y), new Size(labelWidth, 20)));
+            phoneTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
+            Controls.Add(phoneTextBox);
+            y += spacing;
+
+            // User Type
+            Controls.Add(ControlExtensions.CreateLabel("User Type:", new Point(50, y), new Size(labelWidth, 20)));
+            userTypeComboBox = ControlExtensions.CreateComboBox(
+                new Point(170, y),
+                new Size(inputWidth, 20),
+                new string[] { "Passenger", "Driver", "Admin" },
+                0
+            );
+            Controls.Add(userTypeComboBox);
+            y += spacing + 10;
+
+            // Buttons
+            registerButton = ControlExtensions.CreateButton(
+                "Register",
+                new Point(170, y),
+                new Size(100, 30),
+                async (s, e) => await RegisterAsync()
+            );
+            Controls.Add(registerButton);
+
+            cancelButton = ControlExtensions.CreateButton(
+                "Cancel",
+                new Point(280, y),
+                new Size(100, 30),
+                (s, e) => Close()
+            );
+            Controls.Add(cancelButton);
+            y += spacing;
+
+            // Status label
+            statusLabel = ControlExtensions.CreateLabel(
+                "",
+                new Point(50, y),
+                new Size(350, 20),
                 null,
                 ContentAlignment.MiddleCenter
             );
@@ -181,192 +367,4 @@ namespace claudpro
             return true;
         }
     }
-    ForeColor = Color.Red;
-            Controls.Add(statusLabel);
-
-            // Set enter key to trigger login
-            AcceptButton = loginButton;
-        }
-
-private async Task LoginAsync()
-{
-    loginButton.Enabled = false;
-    statusLabel.Text = "Logging in...";
-
-    try
-    {
-        if (string.IsNullOrWhiteSpace(usernameTextBox.Text) || string.IsNullOrWhiteSpace(passwordTextBox.Text))
-        {
-            statusLabel.Text = "Please enter both username and password.";
-            return;
-        }
-
-        var result = await dbService.AuthenticateUserAsync(usernameTextBox.Text, passwordTextBox.Text);
-
-        if (result.Success)
-        {
-            UserId = result.UserId;
-            UserType = result.UserType;
-            Username = usernameTextBox.Text;
-
-            DialogResult = DialogResult.OK;
-            Close();
-        }
-        else
-        {
-            statusLabel.Text = "Invalid username or password.";
-        }
-    }
-    catch (Exception ex)
-    {
-        statusLabel.Text = $"Error: {ex.Message}";
-    }
-    finally
-    {
-        loginButton.Enabled = true;
-    }
 }
-
-private void ShowRegistrationForm()
-{
-    using (var regForm = new RegistrationForm(dbService))
-    {
-        if (regForm.ShowDialog() == DialogResult.OK)
-        {
-            usernameTextBox.Text = regForm.Username;
-            statusLabel.Text = "Registration successful! You can now login.";
-        }
-    }
-}
-    }
-
-    public class RegistrationForm : Form
-{
-    private readonly DatabaseService dbService;
-    private TextBox usernameTextBox;
-    private TextBox passwordTextBox;
-    private TextBox confirmPasswordTextBox;
-    private TextBox nameTextBox;
-    private TextBox emailTextBox;
-    private TextBox phoneTextBox;
-    private ComboBox userTypeComboBox;
-    private Button registerButton;
-    private Button cancelButton;
-    private Label statusLabel;
-
-    public string Username { get; private set; }
-
-    public RegistrationForm(DatabaseService dbService)
-    {
-        this.dbService = dbService;
-        InitializeComponent();
-        SetupUI();
-    }
-
-    private void InitializeComponent()
-    {
-        this.SuspendLayout();
-
-        this.Text = "RideMatch - Registration";
-        this.Size = new Size(450, 400);
-        this.FormBorderStyle = FormBorderStyle.FixedDialog;
-        this.MaximizeBox = false;
-        this.MinimizeBox = false;
-        this.StartPosition = FormStartPosition.CenterParent;
-
-        this.ResumeLayout(false);
-    }
-
-    private void SetupUI()
-    {
-        // Title
-        var titleLabel = ControlExtensions.CreateLabel(
-            "New User Registration",
-            new Point(50, 20),
-            new Size(350, 30),
-            new Font("Arial", 16, FontStyle.Bold),
-            ContentAlignment.MiddleCenter
-        );
-        Controls.Add(titleLabel);
-
-        int y = 70;
-        int labelWidth = 120;
-        int inputWidth = 230;
-        int spacing = 30;
-
-        // Username
-        Controls.Add(ControlExtensions.CreateLabel("Username:", new Point(50, y), new Size(labelWidth, 20)));
-        usernameTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
-        Controls.Add(usernameTextBox);
-        y += spacing;
-
-        // Password
-        Controls.Add(ControlExtensions.CreateLabel("Password:", new Point(50, y), new Size(labelWidth, 20)));
-        passwordTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
-        passwordTextBox.PasswordChar = '*';
-        Controls.Add(passwordTextBox);
-        y += spacing;
-
-        // Confirm Password
-        Controls.Add(ControlExtensions.CreateLabel("Confirm Password:", new Point(50, y), new Size(labelWidth, 20)));
-        confirmPasswordTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
-        confirmPasswordTextBox.PasswordChar = '*';
-        Controls.Add(confirmPasswordTextBox);
-        y += spacing;
-
-        // Name
-        Controls.Add(ControlExtensions.CreateLabel("Name:", new Point(50, y), new Size(labelWidth, 20)));
-        nameTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
-        Controls.Add(nameTextBox);
-        y += spacing;
-
-        // Email
-        Controls.Add(ControlExtensions.CreateLabel("Email:", new Point(50, y), new Size(labelWidth, 20)));
-        emailTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
-        Controls.Add(emailTextBox);
-        y += spacing;
-
-        // Phone
-        Controls.Add(ControlExtensions.CreateLabel("Phone:", new Point(50, y), new Size(labelWidth, 20)));
-        phoneTextBox = ControlExtensions.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
-        Controls.Add(phoneTextBox);
-        y += spacing;
-
-        // User Type
-        Controls.Add(ControlExtensions.CreateLabel("User Type:", new Point(50, y), new Size(labelWidth, 20)));
-        userTypeComboBox = ControlExtensions.CreateComboBox(
-            new Point(170, y),
-            new Size(inputWidth, 20),
-            new string[] { "Passenger", "Driver", "Admin" },
-            0
-        );
-        Controls.Add(userTypeComboBox);
-        y += spacing + 10;
-
-        // Buttons
-        registerButton = ControlExtensions.CreateButton(
-            "Register",
-            new Point(170, y),
-            new Size(100, 30),
-            async (s, e) => await RegisterAsync()
-        );
-        Controls.Add(registerButton);
-
-        cancelButton = ControlExtensions.CreateButton(
-            "Cancel",
-            new Point(280, y),
-            new Size(100, 30),
-            (s, e) => Close()
-        );
-        Controls.Add(cancelButton);
-        y += spacing;
-
-        // Status label
-        statusLabel = ControlExtensions.CreateLabel(
-            "",
-            new Point(50, y),
-            new Size(350, 20),
-            null,
-            ContentAlignment.MiddleCenter
-        );
-        statusLabel.

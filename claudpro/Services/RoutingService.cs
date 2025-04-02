@@ -15,9 +15,9 @@ namespace claudpro.Services
 {
     public class RoutingService
     {
-        private readonly MapService mapService;
-        private readonly double destinationLat;
-        private readonly double destinationLng;
+        private  MapService mapService;
+        private  double destinationLat;
+        private  double destinationLng;
         public Dictionary<int, RouteDetails> VehicleRouteDetails { get; private set; }
 
         public RoutingService(MapService mapService, double destinationLat, double destinationLng)
