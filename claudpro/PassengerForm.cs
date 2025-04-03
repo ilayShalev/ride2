@@ -13,18 +13,10 @@ namespace claudpro
 {
     public partial class PassengerForm : Form
     {
-        private readonly DatabaseService dbService;
-        private readonly MapService mapService;
-        private readonly int userId;
-        private readonly string username;
-        private Passenger passenger;
-        private Vehicle assignedVehicle;
-        private DateTime? pickupTime;
-        private GMapControl gMapControl;
-        private RichTextBox assignmentDetailsTextBox;
-        private CheckBox availabilityCheckBox;
-        private Button refreshButton;
-        private Button logoutButton;
+        // Fields for location setting functionality
+        private bool isSettingLocation = false;
+        private Label locationInstructionsLabel;
+        private TextBox addressTextBox;
 
         public PassengerForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
@@ -137,6 +129,8 @@ namespace claudpro
             };
             Controls.Add(gMapControl);
             mapService.InitializeGoogleMaps(gMapControl);
+            // Add location setting controls
+            AddLocationSettingControls();
         }
 
         private async Task LoadPassengerDataAsync()
@@ -208,6 +202,55 @@ namespace claudpro
             {
                 // Exception handling
             }
+        }
+
+        private void InitializeComponent()
+        {
+            this.SuspendLayout();
+            // 
+            // PassengerForm
+            // 
+            this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Name = "PassengerForm";
+            this.Load += new System.EventHandler(this.PassengerForm_Load);
+            this.ResumeLayout(false);
+
+        }
+
+        private void PassengerForm_Load(object sender, EventArgs e)
+        {
+
+        }
+
+
+        private void AddLocationSettingControls()
+        {
+            // Method implementation
+        }
+
+        private void EnableMapLocationSelection()
+        {
+            // Method implementation
+        }
+
+        private void MapClickToSetLocation(object sender, MouseEventArgs e)
+        {
+            // Method implementation
+        }
+
+        private async Task SearchAddressAsync(string address)
+        {
+            // Method implementation
+        }
+
+        private async void UpdatePassengerLocation(double latitude, double longitude)
+        {
+            // Method implementation
+        }
+
+        private void DisplayPassengerOnMap()
+        {
+            // Method implementation
         }
     }
 }

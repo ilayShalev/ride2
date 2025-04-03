@@ -19,8 +19,19 @@ namespace claudpro
             Application.SetCompatibleTextRenderingDefault(false);
 
             // Database path could be configurable
+            // Add this code to Program.cs or before the database is accessed
             string dbPath = "ridematch.db";
-
+            // Delete existing file if it exists
+            if (System.IO.File.Exists(dbPath))
+            {
+                System.IO.File.Delete(dbPath);
+            }
+            // Create new database
+            using (var dbService = new DatabaseService(dbPath))
+            {
+                // The database will be created with default data through the constructor
+                Console.WriteLine("Database created successfully at: " + dbPath);
+            }
             // Create database service
             using (var dbService = new DatabaseService(dbPath))
             {
