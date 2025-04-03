@@ -1090,5 +1090,85 @@ namespace claudpro.Services
         }
 
         #endregion
+
+
+        /// <summary>
+        /// Saves scheduling settings to the database
+        /// </summary>
+        public async Task SaveSchedulingSettingsAsync(bool isEnabled, DateTime scheduledTime)
+        {
+            // First check if a settings table exists and create it if not
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS Settings (
+                SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
+                SettingName TEXT NOT NULL UNIQUE,
+                SettingValue TEXT NOT NULL
+            )";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // Save the settings
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                // Save isEnabled setting
+                cmd.CommandText = @"
+            INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
+            VALUES (@SettingName, @SettingValue)";
+                cmd.Parameters.AddWithValue("@SettingName", "SchedulingEnabled");
+                cmd.Parameters.AddWithValue("@SettingValue", isEnabled ? "1" : "0");
+                await cmd.ExecuteNonQueryAsync();
+
+                // Save scheduledTime setting
+                cmd.Parameters.Clear();
+                cmd.CommandText = @"
+            INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
+            VALUES (@SettingName, @SettingValue)";
+                cmd.Parameters.AddWithValue("@SettingName", "ScheduledTime");
+                cmd.Parameters.AddWithValue("@SettingValue", scheduledTime.ToString("HH:mm:ss"));
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        /// <summary>
+        /// Gets scheduling settings from the database
+        /// </summary>
+        public async Task<(bool IsEnabled, DateTime ScheduledTime)> GetSchedulingSettingsAsync()
+        {
+            bool isEnabled = false;
+            DateTime scheduledTime = DateTime.Parse("00:00:00"); // Default to midnight
+
+            // Check if the settings table exists
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Settings'";
+                var result = await cmd.ExecuteScalarAsync();
+                if (result == null)
+                    return (isEnabled, scheduledTime); // Return defaults if table doesn't exist
+            }
+
+            // Get isEnabled setting
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'SchedulingEnabled'";
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null)
+                    isEnabled = result.ToString() == "1";
+            }
+
+            // Get scheduledTime setting
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'ScheduledTime'";
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null)
+                    scheduledTime = DateTime.Parse(result.ToString());
+            }
+
+            return (isEnabled, scheduledTime);
+        }
+
+
     }
 }
