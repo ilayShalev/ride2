@@ -1,22 +1,26 @@
-﻿using System;
+﻿// Fix RideMatchSchedulerService.cs to properly handle Windows Service events
+// and to have better error handling
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.ServiceProcess;
 using System.Timers;
 using System.Threading.Tasks;
 using System.IO;
+using System.Configuration;
 using claudpro.Models;
 using claudpro.Services;
-using System.Configuration;
 
 namespace RideMatchScheduler
 {
     public class RideMatchSchedulerService : ServiceBase
     {
         private Timer schedulerTimer;
-        private readonly DatabaseService dbService;
-        private readonly MapService mapService;
-        private readonly string logFilePath = "RideMatchScheduler.log";
+        private DatabaseService dbService;
+        private MapService mapService;
+        private string logFilePath;
+        private bool isRunningTask = false;
 
         public RideMatchSchedulerService()
         {
@@ -24,10 +28,36 @@ namespace RideMatchScheduler
 
             // Initialize services
             string dbPath = ConfigurationManager.AppSettings["DatabasePath"] ?? "ridematch.db";
-            string apiKey = ConfigurationManager.AppSettings["GoogleApiKey"] ?? "AIzaSyA8gY0PbmE1EgDjxd-SdIMWWTaQf9Mi7vc";
 
-            dbService = new DatabaseService(dbPath);
-            mapService = new MapService(apiKey);
+            // Make sure it's an absolute path
+            if (!Path.IsPathRooted(dbPath))
+            {
+                // Use service location as base path
+                dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dbPath);
+            }
+
+            string apiKey = ConfigurationManager.AppSettings["GoogleApiKey"] ?? "";
+
+            // Set up logging path
+            logFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "RideMatchScheduler.log");
+
+            // Create database directory if it doesn't exist
+            string dbDirectory = Path.GetDirectoryName(dbPath);
+            if (!Directory.Exists(dbDirectory) && !string.IsNullOrEmpty(dbDirectory))
+            {
+                Directory.CreateDirectory(dbDirectory);
+            }
+
+            try
+            {
+                dbService = new DatabaseService(dbPath);
+                mapService = new MapService(apiKey);
+            }
+            catch (Exception ex)
+            {
+                Log($"Error initializing services: {ex.Message}");
+                throw; // Re-throw to prevent service from starting with initialization errors
+            }
 
             // Set service name
             ServiceName = "RideMatchSchedulerService";
@@ -37,7 +67,8 @@ namespace RideMatchScheduler
         {
             // Service component initialization
             this.CanStop = true;
-            this.CanPauseAndContinue = false;
+            this.CanPauseAndContinue = true;  // Support pause/continue
+            this.CanShutdown = true;          // Proper shutdown handling
             this.AutoLog = true;
         }
 
@@ -45,24 +76,113 @@ namespace RideMatchScheduler
         {
             Log("RideMatch Scheduler Service started");
 
-            // Set timer to check every minute if it's time to run the algorithm
-            schedulerTimer = new Timer(60000); // 60,000 ms = 1 minute
-            schedulerTimer.Elapsed += CheckScheduleTime;
-            schedulerTimer.Start();
+            try
+            {
+                // Set timer to check every minute if it's time to run the algorithm
+                schedulerTimer = new Timer(60000); // 60,000 ms = 1 minute
+                schedulerTimer.Elapsed += CheckScheduleTime;
+                schedulerTimer.Start();
+
+                // Load initial settings
+                Task.Run(async () => {
+                    try
+                    {
+                        var settings = await dbService.GetSchedulingSettingsAsync();
+                        Log($"Service started. Scheduling is {(settings.IsEnabled ? "enabled" : "disabled")}. " +
+                            $"Scheduled time: {settings.ScheduledTime.ToString("HH:mm:ss")}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Error loading settings: {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Log($"Error in OnStart: {ex.Message}");
+                throw; // Re-throw to notify SCM of startup failure
+            }
         }
 
         protected override void OnStop()
         {
-            Log("RideMatch Scheduler Service stopped");
-            schedulerTimer?.Stop();
-            schedulerTimer?.Dispose();
-            dbService?.Dispose();
+            Log("RideMatch Scheduler Service stopping");
+
+            try
+            {
+                schedulerTimer?.Stop();
+                schedulerTimer?.Dispose();
+
+                // Wait for any running task to complete
+                int waitCount = 0;
+                while (isRunningTask && waitCount < 30) // Wait up to 30 seconds
+                {
+                    System.Threading.Thread.Sleep(1000);
+                    waitCount++;
+                    Log($"Waiting for running task to complete... ({waitCount}/30)");
+                }
+
+                dbService?.Dispose();
+                Log("RideMatch Scheduler Service stopped");
+            }
+            catch (Exception ex)
+            {
+                Log($"Error in OnStop: {ex.Message}");
+            }
+        }
+
+        protected override void OnPause()
+        {
+            try
+            {
+                schedulerTimer?.Stop();
+                Log("RideMatch Scheduler Service paused");
+            }
+            catch (Exception ex)
+            {
+                Log($"Error in OnPause: {ex.Message}");
+            }
+        }
+
+        protected override void OnContinue()
+        {
+            try
+            {
+                schedulerTimer?.Start();
+                Log("RideMatch Scheduler Service resumed");
+            }
+            catch (Exception ex)
+            {
+                Log($"Error in OnContinue: {ex.Message}");
+            }
+        }
+
+        protected override void OnShutdown()
+        {
+            Log("System shutdown detected");
+
+            try
+            {
+                // Same cleanup as OnStop
+                schedulerTimer?.Stop();
+                schedulerTimer?.Dispose();
+                dbService?.Dispose();
+                Log("RideMatch Scheduler Service shutdown complete");
+            }
+            catch (Exception ex)
+            {
+                Log($"Error in OnShutdown: {ex.Message}");
+            }
         }
 
         private async void CheckScheduleTime(object sender, ElapsedEventArgs e)
         {
+            if (isRunningTask) return; // Prevent multiple runs at once
+
             try
             {
+                isRunningTask = true;
+
                 // Get current time
                 DateTime now = DateTime.Now;
 
@@ -82,6 +202,10 @@ namespace RideMatchScheduler
             {
                 Log($"Error in scheduler: {ex.Message}");
             }
+            finally
+            {
+                isRunningTask = false;
+            }
         }
 
         private async Task RunAlgorithmAsync()
@@ -90,6 +214,7 @@ namespace RideMatchScheduler
             {
                 // Get destination information
                 var destination = await dbService.GetDestinationAsync();
+                Log($"Using destination: {destination.Name}, Location: {destination.Latitude}, {destination.Longitude}");
 
                 // Get available vehicles and passengers
                 var vehicles = await dbService.GetAvailableVehiclesAsync();
@@ -116,16 +241,24 @@ namespace RideMatchScheduler
                     // Run the algorithm
                     var solution = solver.Solve(150); // Generations
 
-                    // Calculate route details
-                    routingService.CalculateEstimatedRouteDetails(solution);
+                    if (solution != null)
+                    {
+                        // Calculate route details
+                        routingService.CalculateEstimatedRouteDetails(solution);
 
-                    // Save the solution to database for tomorrow's date
-                    string tomorrowDate = DateTime.Now.AddDays(1).ToString("yyyy-MM-dd");
-                    int routeId = await dbService.SaveSolutionAsync(solution, tomorrowDate);
+                        // Save the solution to database for tomorrow's date
+                        string tomorrowDate = DateTime.Now.AddDays(1).ToString("yyyy-MM-dd");
+                        int routeId = await dbService.SaveSolutionAsync(solution, tomorrowDate);
 
-                    Log($"Algorithm completed and saved as route #{routeId}");
+                        Log($"Algorithm completed and saved as route #{routeId}");
+                        Log($"Assigned {solution.Vehicles.Sum(v => v.AssignedPassengers?.Count ?? 0)} passengers to {solution.Vehicles.Count(v => v.AssignedPassengers?.Count > 0)} vehicles");
 
-                    // You could add here code to send notifications to users
+                        // TODO: Add code here to send notifications to users
+                    }
+                    else
+                    {
+                        Log("Algorithm failed to find a valid solution");
+                    }
                 }
                 else
                 {
@@ -135,6 +268,7 @@ namespace RideMatchScheduler
             catch (Exception ex)
             {
                 Log($"Error running algorithm: {ex.Message}");
+                Log($"Stack trace: {ex.StackTrace}");
             }
         }
 
@@ -154,14 +288,26 @@ namespace RideMatchScheduler
         {
             try
             {
-                using (StreamWriter writer = File.AppendText(logFilePath))
+                // Create the directory if it doesn't exist
+                string directory = Path.GetDirectoryName(logFilePath);
+                if (!Directory.Exists(directory) && !string.IsNullOrEmpty(directory))
                 {
-                    writer.WriteLine($"{DateTime.Now}: {message}");
+                    Directory.CreateDirectory(directory);
+                }
+
+                // Use a lock to prevent multiple threads from writing simultaneously
+                lock (this)
+                {
+                    using (StreamWriter writer = File.AppendText(logFilePath))
+                    {
+                        writer.WriteLine($"{DateTime.Now}: {message}");
+                    }
                 }
             }
             catch
             {
                 // Logging should never crash the service
+                // We can't really log a logging failure...
             }
         }
     }

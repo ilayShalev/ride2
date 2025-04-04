@@ -10,6 +10,7 @@ using GMap.NET.WindowsForms.Markers;
 using claudpro.Models;
 using claudpro.UI;
 using claudpro.Utilities;
+using System.Windows.Forms;
 
 namespace claudpro.Services
 {
@@ -71,51 +72,61 @@ namespace claudpro.Services
         /// </summary>
         public void DisplaySolutionOnMap(GMapControl mapControl, Solution solution)
         {
-            if (solution == null) return;
+            if (mapControl == null || solution == null) return;
 
-            DisplayDataOnMap(mapControl, new List<Passenger>(), solution.Vehicles);
-
-            var routesOverlay = mapControl.Overlays.FirstOrDefault(o => o.Id == "routes");
-            if (routesOverlay == null)
+            try
             {
-                routesOverlay = new GMapOverlay("routes");
-                mapControl.Overlays.Add(routesOverlay);
-            }
-            else
-            {
-                routesOverlay.Routes.Clear();
-            }
+                DisplayDataOnMap(mapControl, new List<Passenger>(), solution.Vehicles);
 
-            var colors = MapOverlays.GetRouteColors();
-
-            for (int i = 0; i < solution.Vehicles.Count; i++)
-            {
-                var vehicle = solution.Vehicles[i];
-                if (vehicle.AssignedPassengers.Count == 0) continue;
-
-                var points = new List<PointLatLng>
+                var routesOverlay = mapControl.Overlays.FirstOrDefault(o => o.Id == "routes");
+                if (routesOverlay == null)
                 {
-                    new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
-                };
-
-                // Add passenger pickup points
-                foreach (var passenger in vehicle.AssignedPassengers)
+                    routesOverlay = new GMapOverlay("routes");
+                    mapControl.Overlays.Add(routesOverlay);
+                }
+                else
                 {
-                    points.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
+                    routesOverlay.Routes.Clear();
                 }
 
-                // Add destination point
-                points.Add(new PointLatLng(destinationLat, destinationLng));
+                var colors = MapOverlays.GetRouteColors();
 
-                // Create route with straight lines
-                var routeColor = colors[i % colors.Length];
-                var route = MapOverlays.CreateRoute(points, $"Route {i}", routeColor);
-                routesOverlay.Routes.Add(route);
+                for (int i = 0; i < solution.Vehicles.Count; i++)
+                {
+                    var vehicle = solution.Vehicles[i];
+                    if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0) continue;
+
+                    var points = new List<PointLatLng>
+            {
+                new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
+            };
+
+                    // Add passenger pickup points
+                    foreach (var passenger in vehicle.AssignedPassengers)
+                    {
+                        if (passenger != null)
+                        {
+                            points.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
+                        }
+                    }
+
+                    // Add destination point
+                    points.Add(new PointLatLng(destinationLat, destinationLng));
+
+                    // Create route with straight lines
+                    var routeColor = colors[i % colors.Length];
+                    var route = MapOverlays.CreateRoute(points, $"Route {i}", routeColor);
+                    routesOverlay.Routes.Add(route);
+                }
+
+                mapControl.Zoom = mapControl.Zoom; // Force refresh
             }
-
-            mapControl.Zoom = mapControl.Zoom; // Force refresh
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error displaying solution on map: {ex.Message}",
+                    "Map Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
-
         /// <summary>
         /// Gets detailed route information using Google Maps Directions API
         /// </summary>

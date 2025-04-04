@@ -414,6 +414,119 @@ namespace claudpro.Services
             return null;
         }
 
+        // Add this method to the DatabaseService class
+        // Place this in the #region Vehicle Methods section
+
+        /// <summary>
+        /// Gets the assigned vehicle for a passenger by passengerId
+        /// </summary>
+        public async Task<Vehicle> GetAssignedVehicleForPassengerAsync(int passengerId)
+        {
+            // Get today's date to find current assignments
+            string today = DateTime.Now.ToString("yyyy-MM-dd");
+
+            // Get the routeId for today
+            int routeId;
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
+                cmd.Parameters.AddWithValue("@SolutionDate", today);
+
+                object result = await cmd.ExecuteScalarAsync();
+                if (result == null || !int.TryParse(result.ToString(), out routeId))
+                {
+                    return null; // No route found for today
+                }
+            }
+
+            // Find the vehicle assigned to this passenger
+            int vehicleId = 0;
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            SELECT rd.VehicleID
+            FROM PassengerAssignments pa
+            JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
+            WHERE rd.RouteID = @RouteID AND pa.PassengerID = @PassengerID";
+                cmd.Parameters.AddWithValue("@RouteID", routeId);
+                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+
+                object result = await cmd.ExecuteScalarAsync();
+                if (result == null || !int.TryParse(result.ToString(), out vehicleId))
+                {
+                    return null; // Passenger not assigned to any vehicle
+                }
+            }
+
+            // Get vehicle details
+            Vehicle vehicle = null;
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, 
+                   u.Name, v.IsAvailableTomorrow
+            FROM Vehicles v
+            LEFT JOIN Users u ON v.UserID = u.UserID
+            WHERE v.VehicleID = @VehicleID";
+                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        vehicle = new Vehicle
+                        {
+                            Id = reader.GetInt32(0),
+                            Capacity = reader.GetInt32(1),
+                            StartLatitude = reader.GetDouble(2),
+                            StartLongitude = reader.GetDouble(3),
+                            StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
+                            DriverName = reader.IsDBNull(5) ? $"Driver #{vehicleId}" : reader.GetString(5),
+                            IsAvailableTomorrow = reader.GetInt32(6) == 1,
+                            // Set default values for UI display properties
+                            Model = "Standard Vehicle",
+                            Color = "White",
+                            LicensePlate = $"V-{vehicleId:D4}"
+                        };
+                    }
+                }
+            }
+
+            // If vehicle was found, get its assigned passengers
+            if (vehicle != null)
+            {
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = @"
+                SELECT p.PassengerID, p.Name, p.Latitude, p.Longitude, p.Address
+                FROM PassengerAssignments pa
+                JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
+                JOIN Passengers p ON pa.PassengerID = p.PassengerID
+                WHERE rd.RouteID = @RouteID AND rd.VehicleID = @VehicleID
+                ORDER BY pa.StopOrder";
+                    cmd.Parameters.AddWithValue("@RouteID", routeId);
+                    cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            vehicle.AssignedPassengers.Add(new Passenger
+                            {
+                                Id = reader.GetInt32(0),
+                                Name = reader.GetString(1),
+                                Latitude = reader.GetDouble(2),
+                                Longitude = reader.GetDouble(3),
+                                Address = reader.IsDBNull(4) ? null : reader.GetString(4)
+                            });
+                        }
+                    }
+                }
+            }
+
+            return vehicle;
+        }
+
         #endregion
 
         #region Passenger Methods

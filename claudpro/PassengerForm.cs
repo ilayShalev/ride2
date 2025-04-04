@@ -244,37 +244,78 @@ namespace claudpro
 
         private void UpdateAssignmentDetailsText()
         {
+            if (assignmentDetailsTextBox == null) return;
+
             assignmentDetailsTextBox.Clear();
 
             if (passenger == null)
             {
                 assignmentDetailsTextBox.AppendText("No passenger profile found.\n");
+                assignmentDetailsTextBox.AppendText("Please set your pickup location first.");
                 return;
             }
 
-            assignmentDetailsTextBox.AppendText($"Your Current Location:\n{passenger.Address}\n\n");
+            try
+            {
+                assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                assignmentDetailsTextBox.AppendText("Your Information:\n");
+                assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
+                assignmentDetailsTextBox.AppendText($"Name: {passenger.Name}\n");
 
-            if (assignedVehicle != null)
-            {
-                assignmentDetailsTextBox.AppendText($"Assigned Driver:\n{assignedVehicle.DriverName}\n\n");
-                assignmentDetailsTextBox.AppendText($"Vehicle:\n{assignedVehicle.Model} ({assignedVehicle.Color})\n");
-                assignmentDetailsTextBox.AppendText($"License Plate: {assignedVehicle.LicensePlate}\n\n");
+                if (!string.IsNullOrEmpty(passenger.Address))
+                    assignmentDetailsTextBox.AppendText($"Pickup Location: {passenger.Address}\n\n");
+                else
+                    assignmentDetailsTextBox.AppendText($"Pickup Location: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n\n");
 
-                // Calculate and display estimated arrival time
-                // This would typically use the route and average speed
-                assignmentDetailsTextBox.AppendText("Estimated Pickup: 8:00 AM\n");
-                assignmentDetailsTextBox.AppendText("Estimated Arrival: 8:45 AM\n");
+                if (assignedVehicle != null)
+                {
+                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                    assignmentDetailsTextBox.AppendText("Your Scheduled Ride:\n");
+                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
+
+                    string driverName = !string.IsNullOrEmpty(assignedVehicle.DriverName)
+                        ? assignedVehicle.DriverName
+                        : $"Driver #{assignedVehicle.Id}";
+
+                    assignmentDetailsTextBox.AppendText($"Driver: {driverName}\n");
+
+                    // Only add vehicle details if they are available
+                    if (!string.IsNullOrEmpty(assignedVehicle.Model))
+                        assignmentDetailsTextBox.AppendText($"Vehicle: {assignedVehicle.Model}\n");
+
+                    if (!string.IsNullOrEmpty(assignedVehicle.Color))
+                        assignmentDetailsTextBox.AppendText($"Color: {assignedVehicle.Color}\n");
+
+                    if (!string.IsNullOrEmpty(assignedVehicle.LicensePlate))
+                        assignmentDetailsTextBox.AppendText($"License Plate: {assignedVehicle.LicensePlate}\n");
+
+                    if (pickupTime.HasValue)
+                    {
+                        assignmentDetailsTextBox.AppendText($"Estimated Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                    }
+                    else
+                    {
+                        assignmentDetailsTextBox.AppendText("Pickup Time: Not yet scheduled\n");
+                    }
+
+                    if (!string.IsNullOrEmpty(assignedVehicle.StartAddress))
+                    {
+                        assignmentDetailsTextBox.AppendText($"Driver Starting From: {assignedVehicle.StartAddress}\n");
+                    }
+                }
+                else
+                {
+                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                    assignmentDetailsTextBox.AppendText("No Ride Scheduled Yet\n");
+                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
+                    assignmentDetailsTextBox.AppendText("Rides for tomorrow will be assigned by the system overnight.\n");
+                    assignmentDetailsTextBox.AppendText("Please check back tomorrow morning for your ride details.\n");
+                }
             }
-            else if (passenger.IsAvailableTomorrow)
+            catch (Exception ex)
             {
-                assignmentDetailsTextBox.AppendText("You are marked as needing a ride tomorrow.\n\n");
-                assignmentDetailsTextBox.AppendText("No driver has been assigned yet.\n");
-                assignmentDetailsTextBox.AppendText("Please check back later.\n");
-            }
-            else
-            {
-                assignmentDetailsTextBox.AppendText("You are not marked as needing a ride tomorrow.\n");
-                assignmentDetailsTextBox.AppendText("Update your status if you need a ride.\n");
+                assignmentDetailsTextBox.Clear();
+                assignmentDetailsTextBox.AppendText($"Error displaying information: {ex.Message}");
             }
         }
 
@@ -332,7 +373,9 @@ namespace claudpro
             // 
             this.ClientSize = new System.Drawing.Size(1000, 700);
             this.Name = "PassengerForm";
+            this.Load += new System.EventHandler(this.PassengerForm_Load);
             this.ResumeLayout(false);
+
         }
 
         private void AddLocationSettingControls()
@@ -569,6 +612,11 @@ namespace claudpro
             gMapControl.Position = new PointLatLng(passenger.Latitude, passenger.Longitude);
             gMapControl.Zoom = 15;
             gMapControl.Refresh();
+        }
+
+        private void PassengerForm_Load(object sender, EventArgs e)
+        {
+
         }
     }
 }

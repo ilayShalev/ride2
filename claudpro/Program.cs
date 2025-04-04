@@ -1,7 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.IO;
+using System.Configuration;
 using System.Windows.Forms;
 using claudpro.Services;
 
@@ -9,29 +8,45 @@ namespace claudpro
 {
     internal static class Program
     {
-        /// <summary>
-        /// The main entry point for the application.
-        /// </summary>
         [STAThread]
         static void Main()
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            // Database path could be configurable
-            // Add this code to Program.cs or before the database is accessed
-            string dbPath = "ridematch.db";
-            // Delete existing file if it exists
-            if (System.IO.File.Exists(dbPath))
+            // Get database path from configuration
+            string dbPath = ConfigurationManager.AppSettings["DatabasePath"] ?? "ridematch.db";
+
+            // Make sure it's an absolute path
+            if (!Path.IsPathRooted(dbPath))
             {
-                System.IO.File.Delete(dbPath);
+                // Store in application folder by default
+                dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, dbPath);
             }
-            // Create new database
-            using (var dbService = new DatabaseService(dbPath))
+
+            // Ensure directory exists
+            string dbDirectory = Path.GetDirectoryName(dbPath);
+            if (!Directory.Exists(dbDirectory) && !string.IsNullOrEmpty(dbDirectory))
             {
-                // The database will be created with default data through the constructor
-                Console.WriteLine("Database created successfully at: " + dbPath);
+                Directory.CreateDirectory(dbDirectory);
             }
+
+            // For development, recreate the database
+            bool isDevMode = false;  // Set to true to recreate DB during development
+            if (isDevMode && File.Exists(dbPath))
+            {
+                try
+                {
+                    File.Delete(dbPath);
+                    Console.WriteLine("Development mode: Deleted existing database");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Could not delete existing database: {ex.Message}",
+                        "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+
             // Create database service
             using (var dbService = new DatabaseService(dbPath))
             {
@@ -40,9 +55,9 @@ namespace claudpro
                 {
                     if (loginForm.ShowDialog() == DialogResult.OK)
                     {
-                        // Create map service (this could be moved to a config file)
-                        const string API_KEY = "AIzaSyA8gY0PbmE1EgDjxd-SdIMWWTaQf9Mi7vc";
-                        var mapService = new MapService(API_KEY);
+                        // Get API key from configuration
+                        string apiKey = ConfigurationManager.AppSettings["GoogleApiKey"];
+                        var mapService = new MapService(apiKey);
 
                         // Show appropriate form based on user type
                         Form mainForm = null;
@@ -50,17 +65,14 @@ namespace claudpro
                         switch (loginForm.UserType.ToLower())
                         {
                             case "admin":
-                                // For admin, show the admin form
                                 mainForm = new AdminForm(dbService, mapService);
                                 break;
 
                             case "driver":
-                                // For driver, show the driver-specific form
                                 mainForm = new DriverForm(dbService, mapService, loginForm.UserId, loginForm.Username);
                                 break;
 
                             case "passenger":
-                                // For passenger, show the passenger-specific form
                                 mainForm = new PassengerForm(dbService, mapService, loginForm.UserId, loginForm.Username);
                                 break;
 
@@ -74,7 +86,6 @@ namespace claudpro
                                 return;
                         }
 
-                        // Run the appropriate form
                         if (mainForm != null)
                         {
                             Application.Run(mainForm);

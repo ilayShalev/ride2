@@ -16,10 +16,10 @@ namespace claudpro
     public partial class MainForm : Form
     {
         // Configuration
-        private const string API_KEY = "AIzaSyA8gY0PbmE1EgDjxd-SdIMWWTaQf9Mi7vc"; //  actual API key
+        private string apiKey = ConfigurationManager.AppSettings["GoogleApiKey"];
 
         // Services
-        private  MapService mapService;
+        private MapService mapService;
         private  RoutingService routingService;
 
         // Data
@@ -917,40 +917,55 @@ namespace claudpro
 
         private void RunAlgorithm()
         {
-            if (passengers.Count == 0 || vehicles.Count == 0)
+            if (passengers == null || passengers.Count == 0 || vehicles == null || vehicles.Count == 0)
             {
                 Log("Please add passengers and vehicles first!");
                 return;
             }
 
-            Log("Running genetic algorithm...");
-            int populationSize = (int)populationSizeUpDown.Value;
-            int generations = (int)generationsUpDown.Value;
+            try
+            {
+                Log("Running genetic algorithm...");
+                int populationSize = (int)populationSizeUpDown.Value;
+                int generations = (int)generationsUpDown.Value;
 
-            var solver = new RideSharingGenetic(
-                passengers,
-                vehicles,
-                populationSize,
-                destinationLat,
-                destinationLng,
-                targetTime
-            );
+                var solver = new RideSharingGenetic(
+                    passengers,
+                    vehicles,
+                    populationSize,
+                    destinationLat,
+                    destinationLng,
+                    targetTime
+                );
 
-            bestSolution = solver.Solve(generations, evaluatedPopulation);
-            evaluatedPopulation = solver.GetLatestPopulation();
+                bestSolution = solver.Solve(generations, evaluatedPopulation);
 
-            int assignedCount = bestSolution.Vehicles.Sum(v => v.AssignedPassengers.Count);
-            Log($"Algorithm completed with score {bestSolution.Score:F2}");
-            Log($"Assigned passengers: {assignedCount}/{passengers.Count}");
+                if (bestSolution == null)
+                {
+                    Log("Algorithm failed to find a solution. Please try different parameters.");
+                    return;
+                }
 
-            if (assignedCount < passengers.Count)
-                Log("WARNING: Not all passengers were assigned!");
+                evaluatedPopulation = solver.GetLatestPopulation();
 
-            routingService.DisplaySolutionOnMap(gMapControl, bestSolution);
-            routingService.CalculateEstimatedRouteDetails(bestSolution);
-            UpdateRouteDetailsDisplay();
+                int assignedCount = bestSolution.Vehicles.Sum(v => v.AssignedPassengers?.Count ?? 0);
+                Log($"Algorithm completed with score {bestSolution.Score:F2}");
+                Log($"Assigned passengers: {assignedCount}/{passengers.Count}");
+
+                if (assignedCount < passengers.Count)
+                    Log("WARNING: Not all passengers were assigned!");
+
+                routingService.DisplaySolutionOnMap(gMapControl, bestSolution);
+                routingService.CalculateEstimatedRouteDetails(bestSolution);
+                UpdateRouteDetailsDisplay();
+            }
+            catch (Exception ex)
+            {
+                Log($"Error running algorithm: {ex.Message}");
+                MessageBox.Show($"Error running algorithm: {ex.Message}\n\n{ex.StackTrace}",
+                    "Algorithm Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
-
         private void ValidateSolution()
         {
             if (bestSolution == null)

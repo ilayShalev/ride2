@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-
-
 using System.Net.Http;
+using System.Windows.Forms;
+using System.Configuration;
+using System.Drawing;
 using GMap.NET;
 using GMap.NET.MapProviders;
 using GMap.NET.WindowsForms;
@@ -16,47 +17,158 @@ using claudpro.Utilities;
 
 namespace claudpro.Services
 {
-    public class MapService
+    public class MapService : IDisposable
     {
         private readonly string apiKey;
         private readonly HttpClient httpClient;
         private readonly Dictionary<string, List<PointLatLng>> routeCache = new Dictionary<string, List<PointLatLng>>();
+        private bool isDisposed = false;
 
-        public MapService(string apiKey)
+        public MapService(string apiKey = null)
         {
+            // Use provided API key or try to load from config
+            if (string.IsNullOrEmpty(apiKey))
+            {
+                apiKey = ConfigurationManager.AppSettings["GoogleApiKey"];
+
+                // If still empty, show a dialog to enter it
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    using (var form = new Form())
+                    {
+                        form.Width = 400;
+                        form.Height = 150;
+                        form.Text = "Google API Key Required";
+
+                        var label = new Label { Left = 20, Top = 20, Text = "Please enter your Google Maps API Key:", Width = 360 };
+                        var textBox = new TextBox { Left = 20, Top = 50, Width = 360 };
+                        var button = new Button { Text = "OK", Left = 160, Top = 80, DialogResult = DialogResult.OK };
+
+                        form.Controls.Add(label);
+                        form.Controls.Add(textBox);
+                        form.Controls.Add(button);
+                        form.AcceptButton = button;
+
+                        if (form.ShowDialog() == DialogResult.OK)
+                        {
+                            apiKey = textBox.Text;
+
+                            // Optionally save to config for future use
+                            try
+                            {
+                                var config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+                                config.AppSettings.Settings["GoogleApiKey"].Value = apiKey;
+                                config.Save(ConfigurationSaveMode.Modified);
+                                ConfigurationManager.RefreshSection("appSettings");
+                            }
+                            catch { /* Ignore save errors */ }
+                        }
+                    }
+                }
+            }
+
             this.apiKey = apiKey;
             this.httpClient = new HttpClient();
-        }
 
-        /// <summary>
-        /// Initializes the Google Maps component
-        /// </summary>
-        public void InitializeGoogleMaps(GMapControl mapControl, double latitude = 32.0853, double longitude = 34.7818)
-        {
-            GMaps.Instance.Mode = AccessMode.ServerAndCache;
-            GoogleMapProvider.Instance.ApiKey = apiKey;
+            // Set timeout for HTTP requests
+            this.httpClient.Timeout = TimeSpan.FromSeconds(30);
 
-            mapControl.MapProvider = GoogleMapProvider.Instance;
-            mapControl.Position = new PointLatLng(latitude, longitude);
-            mapControl.MinZoom = 2;
-            mapControl.MaxZoom = 18;
-            mapControl.Zoom = 12;
-            mapControl.DragButton = System.Windows.Forms.MouseButtons.Left;
-        }
-
-        /// <summary>
-        /// Changes the map provider type
-        /// </summary>
-        public void ChangeMapProvider(GMapControl mapControl, int providerType)
-        {
-            switch (providerType)
+            // Initialize GMap providers
+            try
             {
-                case 0: mapControl.MapProvider = GoogleMapProvider.Instance; break;
-                case 1: mapControl.MapProvider = GoogleSatelliteMapProvider.Instance; break;
-                case 2: mapControl.MapProvider = GoogleHybridMapProvider.Instance; break;
-                case 3: mapControl.MapProvider = GoogleTerrainMapProvider.Instance; break;
+                // Initialize GMap
+                GMaps.Instance.Mode = AccessMode.ServerAndCache;
+
+                // Set API key for providers
+                GoogleMapProvider.Instance.ApiKey = apiKey;
+                GoogleSatelliteMapProvider.Instance.ApiKey = apiKey;
+                GoogleHybridMapProvider.Instance.ApiKey = apiKey;
+                GoogleTerrainMapProvider.Instance.ApiKey = apiKey;
             }
-            mapControl.Refresh();
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error initializing map providers: {ex.Message}",
+                    "Map Initialization Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// Initializes the Google Maps component with error handling
+        /// </summary>
+        public bool InitializeGoogleMaps(GMapControl mapControl, double latitude = 32.0853, double longitude = 34.7818)
+        {
+            if (mapControl == null) return false;
+
+            try
+            {
+                // Set map control properties
+                mapControl.MapProvider = GoogleMapProvider.Instance;
+                mapControl.Position = new PointLatLng(latitude, longitude);
+                mapControl.MinZoom = 2;
+                mapControl.MaxZoom = 18;
+                mapControl.Zoom = 12;
+                mapControl.DragButton = MouseButtons.Left;
+                mapControl.CanDragMap = true;
+                mapControl.ShowCenter = false;
+
+                // Check if provider is working
+                if (!GMaps.Instance.IsStarted)
+                {
+                    GMaps.Instance.Mode = AccessMode.ServerAndCache;
+                    GMaps.Instance.UseRouteCache = true;
+                    GMaps.Instance.UsePlacemarkCache = true;
+                }
+
+                // Enable map events
+                mapControl.OnMapZoomChanged += () =>
+                {
+                    // Save zoom level or perform other actions when zoom changes
+                };
+
+                mapControl.Refresh();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error initializing map: {ex.Message}",
+                    "Map Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Changes the map provider type with error handling
+        /// </summary>
+        public bool ChangeMapProvider(GMapControl mapControl, int providerType)
+        {
+            if (mapControl == null) return false;
+
+            try
+            {
+                switch (providerType)
+                {
+                    case 0: mapControl.MapProvider = GoogleMapProvider.Instance; break;
+                    case 1: mapControl.MapProvider = GoogleSatelliteMapProvider.Instance; break;
+                    case 2: mapControl.MapProvider = GoogleHybridMapProvider.Instance; break;
+                    case 3: mapControl.MapProvider = GoogleTerrainMapProvider.Instance; break;
+                    default: mapControl.MapProvider = GoogleMapProvider.Instance; break;
+                }
+
+                mapControl.Refresh();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error changing map provider: {ex.Message}",
+                    "Map Provider Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return false;
+            }
         }
 
         /// <summary>
@@ -64,27 +176,35 @@ namespace claudpro.Services
         /// </summary>
         public async Task<List<PointLatLng>> GetGoogleDirectionsAsync(List<PointLatLng> waypoints)
         {
-            if (waypoints.Count < 2) return null;
-
-            string cacheKey = string.Join("|", waypoints.Select(p => $"{p.Lat},{p.Lng}"));
-            if (routeCache.ContainsKey(cacheKey)) return routeCache[cacheKey];
-
-            var origin = waypoints[0];
-            var destination = waypoints.Last();
-            var intermediates = waypoints.Skip(1).Take(waypoints.Count - 2).ToList();
-
-            string url = $"https://maps.googleapis.com/maps/api/directions/json?" +
-                $"origin={origin.Lat},{origin.Lng}&" +
-                $"destination={destination.Lat},{destination.Lng}&" +
-                (intermediates.Any() ? $"waypoints={string.Join("|", intermediates.Select(p => $"{p.Lat},{p.Lng}"))}&" : "") +
-                $"key={apiKey}";
+            if (waypoints == null || waypoints.Count < 2) return null;
 
             try
             {
+                string cacheKey = string.Join("|", waypoints.Select(p => $"{p.Lat},{p.Lng}"));
+                if (routeCache.ContainsKey(cacheKey)) return routeCache[cacheKey];
+
+                var origin = waypoints[0];
+                var destination = waypoints.Last();
+                var intermediates = waypoints.Skip(1).Take(waypoints.Count - 2).ToList();
+
+                string url = $"https://maps.googleapis.com/maps/api/directions/json?" +
+                    $"origin={origin.Lat},{origin.Lng}&" +
+                    $"destination={destination.Lat},{destination.Lng}&" +
+                    (intermediates.Any() ? $"waypoints={string.Join("|", intermediates.Select(p => $"{p.Lat},{p.Lng}"))}&" : "") +
+                    $"key={apiKey}";
+
                 var response = await httpClient.GetStringAsync(url);
                 dynamic data = JsonConvert.DeserializeObject(response);
 
-                if (data.status != "OK") return null;
+                if (data.status != "OK")
+                {
+                    string errorMessage = data.status.ToString();
+                    if (data.error_message != null)
+                    {
+                        errorMessage += $": {data.error_message.ToString()}";
+                    }
+                    throw new Exception($"Google Directions API error: {errorMessage}");
+                }
 
                 var points = new List<PointLatLng>();
                 foreach (var leg in data.routes[0].legs)
@@ -94,8 +214,12 @@ namespace claudpro.Services
                 routeCache[cacheKey] = points;
                 return points;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                MessageBox.Show($"Error getting directions: {ex.Message}",
+                    "Directions Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
                 return null;
             }
         }
@@ -105,7 +229,8 @@ namespace claudpro.Services
         /// </summary>
         public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng)
         {
-            if (vehicle.AssignedPassengers.Count == 0) return null;
+            if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
+                return null;
 
             try
             {
@@ -125,7 +250,12 @@ namespace claudpro.Services
 
                 if (data.status.ToString() != "OK")
                 {
-                    return null;
+                    string errorMessage = data.status.ToString();
+                    if (data.error_message != null)
+                    {
+                        errorMessage += $": {data.error_message.ToString()}";
+                    }
+                    throw new Exception($"Google Directions API error: {errorMessage}");
                 }
 
                 var routeDetail = new RouteDetails
@@ -174,8 +304,12 @@ namespace claudpro.Services
 
                 return routeDetail;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                MessageBox.Show($"Error getting route details: {ex.Message}",
+                   "Route Details Error",
+                   MessageBoxButtons.OK,
+                   MessageBoxIcon.Warning);
                 return null;
             }
         }
@@ -185,95 +319,101 @@ namespace claudpro.Services
         /// </summary>
         public RouteDetails EstimateRouteDetails(Vehicle vehicle, double destinationLat, double destinationLng)
         {
-            if (vehicle.AssignedPassengers.Count == 0) return null;
+            if (vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
+                return null;
 
-            var routeDetail = new RouteDetails
+            try
             {
-                VehicleId = vehicle.Id,
-                TotalDistance = 0,
-                TotalTime = 0,
-                StopDetails = new List<StopDetail>()
-            };
+                var routeDetail = new RouteDetails
+                {
+                    VehicleId = vehicle.Id,
+                    TotalDistance = 0,
+                    TotalTime = 0,
+                    StopDetails = new List<StopDetail>()
+                };
 
-            // Calculate time from vehicle start to first passenger
-            double currentLat = vehicle.StartLatitude;
-            double currentLng = vehicle.StartLongitude;
-            double totalDistance = 0;
-            double totalTime = 0;
+                // Calculate time from vehicle start to first passenger
+                double currentLat = vehicle.StartLatitude;
+                double currentLng = vehicle.StartLongitude;
+                double totalDistance = 0;
+                double totalTime = 0;
 
-            for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
-            {
-                var passenger = vehicle.AssignedPassengers[i];
-                double distance = GeoCalculator.CalculateDistance(currentLat, currentLng, passenger.Latitude, passenger.Longitude);
-                double time = (distance / 30.0) * 60; // Assuming 30 km/h average speed
+                for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
+                {
+                    var passenger = vehicle.AssignedPassengers[i];
+                    if (passenger == null) continue;
 
-                totalDistance += distance;
-                totalTime += time;
+                    double distance = GeoCalculator.CalculateDistance(currentLat, currentLng, passenger.Latitude, passenger.Longitude);
+                    double time = (distance / 30.0) * 60; // Assuming 30 km/h average speed
+
+                    totalDistance += distance;
+                    totalTime += time;
+
+                    routeDetail.StopDetails.Add(new StopDetail
+                    {
+                        StopNumber = i + 1,
+                        PassengerId = passenger.Id,
+                        PassengerName = passenger.Name,
+                        DistanceFromPrevious = distance,
+                        TimeFromPrevious = time,
+                        CumulativeDistance = totalDistance,
+                        CumulativeTime = totalTime
+                    });
+
+                    currentLat = passenger.Latitude;
+                    currentLng = passenger.Longitude;
+                }
+
+                // Calculate trip to final destination
+                double distToDest = GeoCalculator.CalculateDistance(currentLat, currentLng, destinationLat, destinationLng);
+                double timeToDest = (distToDest / 30.0) * 60;
+
+                totalDistance += distToDest;
+                totalTime += timeToDest;
 
                 routeDetail.StopDetails.Add(new StopDetail
                 {
-                    StopNumber = i + 1,
-                    PassengerId = passenger.Id,
-                    PassengerName = passenger.Name,
-                    DistanceFromPrevious = distance,
-                    TimeFromPrevious = time,
+                    StopNumber = vehicle.AssignedPassengers.Count + 1,
+                    PassengerId = -1,
+                    PassengerName = "Destination",
+                    DistanceFromPrevious = distToDest,
+                    TimeFromPrevious = timeToDest,
                     CumulativeDistance = totalDistance,
                     CumulativeTime = totalTime
                 });
 
-                currentLat = passenger.Latitude;
-                currentLng = passenger.Longitude;
+                routeDetail.TotalDistance = totalDistance;
+                routeDetail.TotalTime = totalTime;
+
+                return routeDetail;
             }
-
-            // Calculate trip to final destination
-            double distToDest = GeoCalculator.CalculateDistance(currentLat, currentLng, destinationLat, destinationLng);
-            double timeToDest = (distToDest / 30.0) * 60;
-
-            totalDistance += distToDest;
-            totalTime += timeToDest;
-
-            routeDetail.StopDetails.Add(new StopDetail
+            catch (Exception ex)
             {
-                StopNumber = vehicle.AssignedPassengers.Count + 1,
-                PassengerId = -1,
-                PassengerName = "Destination",
-                DistanceFromPrevious = distToDest,
-                TimeFromPrevious = timeToDest,
-                CumulativeDistance = totalDistance,
-                CumulativeTime = totalTime
-            });
-
-            routeDetail.TotalDistance = totalDistance;
-            routeDetail.TotalTime = totalTime;
-
-            return routeDetail;
+                MessageBox.Show($"Error estimating route details: {ex.Message}",
+                   "Route Estimation Error",
+                   MessageBoxButtons.OK,
+                   MessageBoxIcon.Warning);
+                return null;
+            }
         }
 
         /// <summary>
         /// Gets a color for a route based on the route index
         /// </summary>
-        public System.Drawing.Color GetRouteColor(int index)
+        public Color GetRouteColor(int index)
         {
-            System.Drawing.Color[] routeColors = {
-                System.Drawing.Color.FromArgb(255, 128, 0),   // Orange
-                System.Drawing.Color.FromArgb(128, 0, 128),   // Purple
-                System.Drawing.Color.FromArgb(0, 128, 128),   // Teal
-                System.Drawing.Color.FromArgb(128, 0, 0),     // Maroon
-                System.Drawing.Color.FromArgb(0, 128, 0),     // Green
-                System.Drawing.Color.FromArgb(0, 0, 128),     // Navy
-                System.Drawing.Color.FromArgb(128, 128, 0),   // Olive
-                System.Drawing.Color.FromArgb(128, 0, 64)     // Burgundy
+            Color[] routeColors = {
+                Color.FromArgb(255, 128, 0),   // Orange
+                Color.FromArgb(128, 0, 128),   // Purple
+                Color.FromArgb(0, 128, 128),   // Teal
+                Color.FromArgb(128, 0, 0),     // Maroon
+                Color.FromArgb(0, 128, 0),     // Green
+                Color.FromArgb(0, 0, 128),     // Navy
+                Color.FromArgb(128, 128, 0),   // Olive
+                Color.FromArgb(128, 0, 64)     // Burgundy
             };
             return routeColors[index % routeColors.Length];
         }
-
-        public void Dispose()
-        {
-            httpClient?.Dispose();
-        }
-
-
-        // Add this method to the MapService class in MapService.cs
 
         /// <summary>
         /// Geocodes an address string to latitude and longitude coordinates
@@ -295,7 +435,12 @@ namespace claudpro.Services
 
                 if (data.status.ToString() != "OK" || data.results.Count == 0)
                 {
-                    return null;
+                    string errorMessage = data.status.ToString();
+                    if (data.error_message != null)
+                    {
+                        errorMessage += $": {data.error_message.ToString()}";
+                    }
+                    throw new Exception($"Geocoding error: {errorMessage}");
                 }
 
                 double lat = Convert.ToDouble(data.results[0].geometry.location.lat);
@@ -303,8 +448,12 @@ namespace claudpro.Services
 
                 return (lat, lng);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                MessageBox.Show($"Error geocoding address: {ex.Message}",
+                   "Geocoding Error",
+                   MessageBoxButtons.OK,
+                   MessageBoxIcon.Warning);
                 return null;
             }
         }
@@ -326,15 +475,49 @@ namespace claudpro.Services
 
                 if (data.status.ToString() != "OK" || data.results.Count == 0)
                 {
-                    return null;
+                    string errorMessage = data.status.ToString();
+                    if (data.error_message != null)
+                    {
+                        errorMessage += $": {data.error_message.ToString()}";
+                    }
+                    throw new Exception($"Reverse geocoding error: {errorMessage}");
                 }
 
                 return data.results[0].formatted_address.ToString();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                MessageBox.Show($"Error reverse geocoding: {ex.Message}",
+                   "Reverse Geocoding Error",
+                   MessageBoxButtons.OK,
+                   MessageBoxIcon.Warning);
                 return null;
             }
+        }
+
+        // IDisposable implementation
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!isDisposed)
+            {
+                if (disposing)
+                {
+                    httpClient?.Dispose();
+                }
+
+                isDisposed = true;
+            }
+        }
+
+        ~MapService()
+        {
+            Dispose(false);
         }
     }
 }
