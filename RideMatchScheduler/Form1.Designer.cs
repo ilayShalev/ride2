@@ -1,4 +1,4 @@
-﻿namespace claudpro
+﻿namespace RideMatchScheduler
 {
     partial class Form1
     {

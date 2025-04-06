@@ -10,6 +10,8 @@ using claudpro.Models;
 using claudpro.Services;
 using claudpro.UI;
 using claudpro.Utilities;
+using System.Configuration;
+
 
 namespace claudpro
 {
@@ -58,7 +60,7 @@ namespace claudpro
             InitializeComponent();
 
             // Initialize services
-            mapService = new MapService(API_KEY);
+            mapService = new MapService(apiKey);
             routingService = new RoutingService(mapService, destinationLat, destinationLng);
 
             SetupUI();

@@ -1,4 +1,6 @@
-﻿namespace claudpro
+﻿using System;
+
+namespace claudpro
 {
     partial class Form1
     {
@@ -43,6 +45,12 @@
         }
 
         #endregion
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            // Initialization code for when Form1 loads
+            // This can remain empty if you don't need additional setup
+        }
     }
+
 }
 

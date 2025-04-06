@@ -1,13 +1,14 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GMap.NET;
 using GMap.NET.WindowsForms;
+using GMap.NET.WindowsForms.Markers;
 using claudpro.Models;
 using claudpro.Services;
 using claudpro.UI;
-using System.Collections.Generic;
 
 namespace claudpro
 {
@@ -35,6 +36,7 @@ namespace claudpro
         // Data models
         private Passenger passenger;
         private Vehicle assignedVehicle;
+        private DateTime? pickupTime;
 
         public PassengerForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
@@ -54,8 +56,7 @@ namespace claudpro
 
         private void SetupUI()
         {
-            // Set form properties - this can be moved to the designer
-            this.Text = "RideMatch - Passenger Interface";
+            // Set form properties
             this.Size = new Size(1000, 700);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -152,232 +153,6 @@ namespace claudpro
             mapService.InitializeGoogleMaps(gMapControl);
         }
 
-        private async Task LoadPassengerDataAsync()
-        {
-            refreshButton.Enabled = false;
-            assignmentDetailsTextBox.Clear();
-            assignmentDetailsTextBox.AppendText("Loading ride details...\n");
-
-            try
-            {
-                // Load passenger data
-                passenger = await dbService.GetPassengerByUserIdAsync(userId);
-
-                if (passenger != null)
-                {
-                    // Update UI to reflect passenger data
-                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
-
-                    // Try to load assigned vehicle if available
-                    assignedVehicle = await dbService.GetAssignedVehicleForPassengerAsync(passenger.Id);
-
-                    // Display data on map and in text
-                    DisplayAssignmentOnMap();
-                    UpdateAssignmentDetailsText();
-                }
-                else
-                {
-                    assignmentDetailsTextBox.Clear();
-                    assignmentDetailsTextBox.AppendText("No passenger profile found. Set your location to create a profile.\n");
-                }
-            }
-            catch (Exception ex)
-            {
-                assignmentDetailsTextBox.Clear();
-                assignmentDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
-            }
-            finally
-            {
-                refreshButton.Enabled = true;
-            }
-        }
-
-        private void DisplayAssignmentOnMap()
-        {
-            gMapControl.Overlays.Clear();
-
-            if (passenger == null)
-                return;
-
-            // Create overlays
-            var vehiclesOverlay = new GMapOverlay("vehicles");
-            var passengersOverlay = new GMapOverlay("passengers");
-            var routesOverlay = new GMapOverlay("routes");
-            var destinationOverlay = new GMapOverlay("destination");
-
-            // Add passenger marker
-            var passengerMarker = MapOverlays.CreatePassengerMarker(passenger);
-            passengersOverlay.Markers.Add(passengerMarker);
-
-            // If assigned to a vehicle, add vehicle marker and route
-            if (assignedVehicle != null)
-            {
-                var vehicleMarker = MapOverlays.CreateVehicleMarker(assignedVehicle);
-                vehiclesOverlay.Markers.Add(vehicleMarker);
-
-                // Get destination and create marker
-                Task.Run(async () => {
-                    var destination = await dbService.GetDestinationAsync();
-                    this.Invoke(new Action(() => {
-                        var destinationMarker = MapOverlays.CreateDestinationMarker(destination.Latitude, destination.Longitude);
-                        destinationOverlay.Markers.Add(destinationMarker);
-
-                        // Add route from vehicle to passenger to destination
-                        // This would typically call a routing service and add route points
-
-                        gMapControl.Overlays.Add(destinationOverlay);
-                        gMapControl.Refresh();
-                    }));
-                });
-            }
-
-            // Add overlays to map
-            gMapControl.Overlays.Add(passengersOverlay);
-            gMapControl.Overlays.Add(vehiclesOverlay);
-            gMapControl.Overlays.Add(routesOverlay);
-
-            // Center map on passenger
-            gMapControl.Position = new PointLatLng(passenger.Latitude, passenger.Longitude);
-            gMapControl.Zoom = 14;
-            gMapControl.Refresh();
-        }
-
-        private void UpdateAssignmentDetailsText()
-        {
-            if (assignmentDetailsTextBox == null) return;
-
-            assignmentDetailsTextBox.Clear();
-
-            if (passenger == null)
-            {
-                assignmentDetailsTextBox.AppendText("No passenger profile found.\n");
-                assignmentDetailsTextBox.AppendText("Please set your pickup location first.");
-                return;
-            }
-
-            try
-            {
-                assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                assignmentDetailsTextBox.AppendText("Your Information:\n");
-                assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-                assignmentDetailsTextBox.AppendText($"Name: {passenger.Name}\n");
-
-                if (!string.IsNullOrEmpty(passenger.Address))
-                    assignmentDetailsTextBox.AppendText($"Pickup Location: {passenger.Address}\n\n");
-                else
-                    assignmentDetailsTextBox.AppendText($"Pickup Location: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n\n");
-
-                if (assignedVehicle != null)
-                {
-                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                    assignmentDetailsTextBox.AppendText("Your Scheduled Ride:\n");
-                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-
-                    string driverName = !string.IsNullOrEmpty(assignedVehicle.DriverName)
-                        ? assignedVehicle.DriverName
-                        : $"Driver #{assignedVehicle.Id}";
-
-                    assignmentDetailsTextBox.AppendText($"Driver: {driverName}\n");
-
-                    // Only add vehicle details if they are available
-                    if (!string.IsNullOrEmpty(assignedVehicle.Model))
-                        assignmentDetailsTextBox.AppendText($"Vehicle: {assignedVehicle.Model}\n");
-
-                    if (!string.IsNullOrEmpty(assignedVehicle.Color))
-                        assignmentDetailsTextBox.AppendText($"Color: {assignedVehicle.Color}\n");
-
-                    if (!string.IsNullOrEmpty(assignedVehicle.LicensePlate))
-                        assignmentDetailsTextBox.AppendText($"License Plate: {assignedVehicle.LicensePlate}\n");
-
-                    if (pickupTime.HasValue)
-                    {
-                        assignmentDetailsTextBox.AppendText($"Estimated Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
-                    }
-                    else
-                    {
-                        assignmentDetailsTextBox.AppendText("Pickup Time: Not yet scheduled\n");
-                    }
-
-                    if (!string.IsNullOrEmpty(assignedVehicle.StartAddress))
-                    {
-                        assignmentDetailsTextBox.AppendText($"Driver Starting From: {assignedVehicle.StartAddress}\n");
-                    }
-                }
-                else
-                {
-                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                    assignmentDetailsTextBox.AppendText("No Ride Scheduled Yet\n");
-                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-                    assignmentDetailsTextBox.AppendText("Rides for tomorrow will be assigned by the system overnight.\n");
-                    assignmentDetailsTextBox.AppendText("Please check back tomorrow morning for your ride details.\n");
-                }
-            }
-            catch (Exception ex)
-            {
-                assignmentDetailsTextBox.Clear();
-                assignmentDetailsTextBox.AppendText($"Error displaying information: {ex.Message}");
-            }
-        }
-
-        private async Task UpdateAvailabilityAsync()
-        {
-            if (passenger == null)
-                return;
-
-            try
-            {
-                bool success = await dbService.UpdatePassengerAvailabilityAsync(passenger.Id, availabilityCheckBox.Checked);
-
-                if (success)
-                {
-                    passenger.IsAvailableTomorrow = availabilityCheckBox.Checked;
-
-                    // If now available and not assigned, show message
-                    if (passenger.IsAvailableTomorrow && assignedVehicle == null)
-                    {
-                        MessageBox.Show("Your ride request has been submitted. A driver will be assigned soon.",
-                            "Status Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-
-                    // Refresh UI to reflect change
-                    UpdateAssignmentDetailsText();
-                }
-                else
-                {
-                    MessageBox.Show("Failed to update availability. Please try again.",
-                        "Update Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-                    // Revert checkbox to match database state
-                    availabilityCheckBox.CheckedChanged -= async (s, e) => await UpdateAvailabilityAsync();
-                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
-                    availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error updating availability: {ex.Message}",
-                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
-                // Revert checkbox to match database state
-                availabilityCheckBox.CheckedChanged -= async (s, e) => await UpdateAvailabilityAsync();
-                availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
-                availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
-            }
-        }
-
-        private void InitializeComponent()
-        {
-            this.SuspendLayout();
-            // 
-            // PassengerForm
-            // 
-            this.ClientSize = new System.Drawing.Size(1000, 700);
-            this.Name = "PassengerForm";
-            this.Load += new System.EventHandler(this.PassengerForm_Load);
-            this.ResumeLayout(false);
-
-        }
-
         private void AddLocationSettingControls()
         {
             // Add a separator panel
@@ -438,6 +213,48 @@ namespace claudpro
             locationInstructionsLabel.ForeColor = Color.Red;
             locationInstructionsLabel.Visible = false;
             leftPanel.Controls.Add(locationInstructionsLabel);
+        }
+
+        private async Task LoadPassengerDataAsync()
+        {
+            refreshButton.Enabled = false;
+            assignmentDetailsTextBox.Clear();
+            assignmentDetailsTextBox.AppendText("Loading ride details...\n");
+
+            try
+            {
+                // Load passenger data
+                passenger = await dbService.GetPassengerByUserIdAsync(userId);
+
+                if (passenger != null)
+                {
+                    // Update UI to reflect passenger data
+                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
+
+                    // Try to load assigned vehicle if available
+                    var assignment = await dbService.GetPassengerAssignmentAsync(userId, DateTime.Now.ToString("yyyy-MM-dd"));
+                    assignedVehicle = assignment.AssignedVehicle;
+                    pickupTime = assignment.PickupTime;
+
+                    // Display data on map and in text
+                    DisplayPassengerOnMap();
+                    UpdateAssignmentDetailsText();
+                }
+                else
+                {
+                    assignmentDetailsTextBox.Clear();
+                    assignmentDetailsTextBox.AppendText("No passenger profile found. Set your location to create a profile.\n");
+                }
+            }
+            catch (Exception ex)
+            {
+                assignmentDetailsTextBox.Clear();
+                assignmentDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
+            }
+            finally
+            {
+                refreshButton.Enabled = true;
+            }
         }
 
         private void EnableMapLocationSelection()
@@ -614,9 +431,145 @@ namespace claudpro
             gMapControl.Refresh();
         }
 
+        private void UpdateAssignmentDetailsText()
+        {
+            if (assignmentDetailsTextBox == null) return;
+
+            assignmentDetailsTextBox.Clear();
+
+            if (passenger == null)
+            {
+                assignmentDetailsTextBox.AppendText("No passenger profile found.\n");
+                assignmentDetailsTextBox.AppendText("Please set your pickup location first.");
+                return;
+            }
+
+            try
+            {
+                assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                assignmentDetailsTextBox.AppendText("Your Information:\n");
+                assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
+                assignmentDetailsTextBox.AppendText($"Name: {passenger.Name}\n");
+
+                if (!string.IsNullOrEmpty(passenger.Address))
+                    assignmentDetailsTextBox.AppendText($"Pickup Location: {passenger.Address}\n\n");
+                else
+                    assignmentDetailsTextBox.AppendText($"Pickup Location: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n\n");
+
+                if (assignedVehicle != null)
+                {
+                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                    assignmentDetailsTextBox.AppendText("Your Scheduled Ride:\n");
+                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
+
+                    string driverName = !string.IsNullOrEmpty(assignedVehicle.DriverName)
+                        ? assignedVehicle.DriverName
+                        : $"Driver #{assignedVehicle.Id}";
+
+                    assignmentDetailsTextBox.AppendText($"Driver: {driverName}\n");
+
+                    // Only add vehicle details if they are available
+                    if (!string.IsNullOrEmpty(assignedVehicle.Model))
+                        assignmentDetailsTextBox.AppendText($"Vehicle: {assignedVehicle.Model}\n");
+
+                    if (!string.IsNullOrEmpty(assignedVehicle.Color))
+                        assignmentDetailsTextBox.AppendText($"Color: {assignedVehicle.Color}\n");
+
+                    if (!string.IsNullOrEmpty(assignedVehicle.LicensePlate))
+                        assignmentDetailsTextBox.AppendText($"License Plate: {assignedVehicle.LicensePlate}\n");
+
+                    if (pickupTime.HasValue)
+                    {
+                        assignmentDetailsTextBox.AppendText($"Estimated Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                    }
+                    else
+                    {
+                        assignmentDetailsTextBox.AppendText("Pickup Time: Not yet scheduled\n");
+                    }
+
+                    if (!string.IsNullOrEmpty(assignedVehicle.StartAddress))
+                    {
+                        assignmentDetailsTextBox.AppendText($"Driver Starting From: {assignedVehicle.StartAddress}\n");
+                    }
+                }
+                else
+                {
+                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                    assignmentDetailsTextBox.AppendText("No Ride Scheduled Yet\n");
+                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
+                    assignmentDetailsTextBox.AppendText("Rides for tomorrow will be assigned by the system overnight.\n");
+                    assignmentDetailsTextBox.AppendText("Please check back tomorrow morning for your ride details.\n");
+                }
+            }
+            catch (Exception ex)
+            {
+                assignmentDetailsTextBox.Clear();
+                assignmentDetailsTextBox.AppendText($"Error displaying information: {ex.Message}");
+            }
+        }
+
+        private async Task UpdateAvailabilityAsync()
+        {
+            if (passenger == null)
+                return;
+
+            try
+            {
+                bool success = await dbService.UpdatePassengerAvailabilityAsync(passenger.Id, availabilityCheckBox.Checked);
+
+                if (success)
+                {
+                    passenger.IsAvailableTomorrow = availabilityCheckBox.Checked;
+
+                    // If now available and not assigned, show message
+                    if (passenger.IsAvailableTomorrow && assignedVehicle == null)
+                    {
+                        MessageBox.Show("Your ride request has been submitted. A driver will be assigned soon.",
+                            "Status Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+
+                    // Refresh UI to reflect change
+                    UpdateAssignmentDetailsText();
+                }
+                else
+                {
+                    MessageBox.Show("Failed to update availability. Please try again.",
+                        "Update Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                    // Revert checkbox to match database state
+                    availabilityCheckBox.CheckedChanged -= async (s, e) => await UpdateAvailabilityAsync();
+                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
+                    availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error updating availability: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                // Revert checkbox to match database state
+                availabilityCheckBox.CheckedChanged -= async (s, e) => await UpdateAvailabilityAsync();
+                availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
+                availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
+            }
+        }
+
         private void PassengerForm_Load(object sender, EventArgs e)
         {
-
+            // Initialization code for PassengerForm
+            try
+            {
+                if (gMapControl != null)
+                {
+                    gMapControl.Position = new PointLatLng(32.0741, 34.7922); // Default to Tel Aviv
+                    gMapControl.Zoom = 12;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error initializing map: {ex.Message}", "Initialization Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
     }
 }

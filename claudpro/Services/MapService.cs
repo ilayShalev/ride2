@@ -114,11 +114,17 @@ namespace claudpro.Services
                 mapControl.ShowCenter = false;
 
                 // Check if provider is working
-                if (!GMaps.Instance.IsStarted)
+                // Initialize GMap provider
+                try
                 {
                     GMaps.Instance.Mode = AccessMode.ServerAndCache;
                     GMaps.Instance.UseRouteCache = true;
                     GMaps.Instance.UsePlacemarkCache = true;
+                }
+                catch (Exception ex)
+                {
+                    // Just log the error but continue - the map might still work
+                    Console.WriteLine($"Warning initializing GMaps: {ex.Message}");
                 }
 
                 // Enable map events
