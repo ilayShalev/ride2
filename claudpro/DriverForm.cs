@@ -33,7 +33,7 @@ namespace claudpro
         private Label locationInstructionsLabel;
         private AddressSearchControl addressSearchControl;
         private Button setLocationButton;
-
+        
         // Fields for vehicle capacity
         private NumericUpDown capacityNumericUpDown;
         private Button updateCapacityButton;
@@ -140,13 +140,13 @@ namespace claudpro
                     new Size(150, 20),
                     new Font("Arial", 10, FontStyle.Bold)
                 ));
-
+                
                 leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                    "Number of seats:",
-                    new Point(20, 120),
+                    "Number of seats:", 
+                    new Point(20, 120), 
                     new Size(150, 20)
                 ));
-
+                
                 capacityNumericUpDown = new NumericUpDown
                 {
                     Location = new Point(180, 120),
@@ -156,7 +156,7 @@ namespace claudpro
                     Value = 4 // Default 4 seats
                 };
                 leftPanel.Controls.Add(capacityNumericUpDown);
-
+                
                 updateCapacityButton = ControlExtensions.CreateButton(
                     "Update Capacity",
                     new Point(180, 150),
@@ -320,7 +320,7 @@ namespace claudpro
                     routeDetailsTextBox.Clear();
                     routeDetailsTextBox.AppendText("No vehicle is assigned to you.\n");
                     routeDetailsTextBox.AppendText("Please set your vehicle information.\n");
-
+                    
                     // Initialize with default values
                     vehicle = new Vehicle
                     {
@@ -329,7 +329,7 @@ namespace claudpro
                         IsAvailableTomorrow = true,
                         DriverName = username
                     };
-
+                    
                     return;
                 }
 
@@ -431,7 +431,7 @@ namespace claudpro
                                 gMapControl.Overlays.Add(newDestOverlay);
 
                                 // Create route if we have passengers
-                                if (assignedPassengers != null && assignedPassengers.Count > 0 &&
+                                if (assignedPassengers != null && assignedPassengers.Count > 0 && 
                                     (vehicle.StartLatitude != 0 || vehicle.StartLongitude != 0))
                                 {
                                     var routePoints = new List<PointLatLng>();
@@ -582,24 +582,24 @@ namespace claudpro
                 availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
             }
         }
-
+        
         private async Task UpdateVehicleCapacityAsync()
         {
             if (vehicle == null || capacityNumericUpDown == null)
                 return;
-
+                
             try
             {
                 int newCapacity = (int)capacityNumericUpDown.Value;
-
+                
                 bool success = await dbService.UpdateVehicleCapacityAsync(userId, newCapacity);
-
+                
                 if (success)
                 {
                     vehicle.Capacity = newCapacity;
                     MessageBox.Show($"Vehicle capacity updated to {newCapacity} seats.",
                         "Capacity Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
+                    
                     // Refresh route details to show the updated capacity
                     UpdateRouteDetailsText(pickupTime);
                 }
@@ -607,7 +607,7 @@ namespace claudpro
                 {
                     MessageBox.Show("Failed to update vehicle capacity. Please try again.",
                         "Update Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
+                        
                     // Revert numeric control to match database state
                     capacityNumericUpDown.Value = vehicle.Capacity;
                 }
@@ -616,7 +616,7 @@ namespace claudpro
             {
                 MessageBox.Show($"Error updating vehicle capacity: {ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
+                    
                 // Revert numeric control to match database state
                 capacityNumericUpDown.Value = vehicle.Capacity;
             }
@@ -731,20 +731,20 @@ namespace claudpro
 
                 // Update vehicle in database
                 bool success;
-
+                
                 if (vehicle == null || vehicle.Id == 0)
                 {
                     // Create a new vehicle
                     int vehicleId = await dbService.SaveDriverVehicleAsync(
-                        userId,
+                        userId, 
                         capacityNumericUpDown != null ? (int)capacityNumericUpDown.Value : 4,
                         latitude,
                         longitude,
                         address
                     );
-
+                    
                     success = vehicleId > 0;
-
+                    
                     if (success)
                     {
                         // Load the newly created vehicle
@@ -760,7 +760,7 @@ namespace claudpro
                         longitude,
                         address
                     );
-
+                    
                     if (success)
                     {
                         // Update local vehicle data

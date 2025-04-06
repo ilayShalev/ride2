@@ -1669,95 +1669,6 @@ namespace claudpro.Services
             return (vehicle, passengers, firstPickupTime);
         }
 
-        /// <summary>
-        /// Gets a passenger's assigned vehicle and pickup time for a specific date
-        /// </summary>
-        public async Task<(Vehicle AssignedVehicle, DateTime? PickupTime)> GetPassengerAssignmentAsync(int userId, string date)
-        {
-            // Get passenger first
-            var passenger = await GetPassengerByUserIdAsync(userId);
-            if (passenger == null)
-            {
-                return (null, null);
-            }
-
-            // Get route for this date
-            int routeId;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
-                cmd.Parameters.AddWithValue("@SolutionDate", date);
-
-                object result = await cmd.ExecuteScalarAsync();
-                if (result == null || !int.TryParse(result.ToString(), out routeId))
-                {
-                    return (null, null);
-                }
-            }
-
-            // Find passenger assignment
-            int vehicleId = 0;
-            string pickupTime = null;
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT rd.VehicleID, pa.EstimatedPickupTime
-                    FROM PassengerAssignments pa
-                    JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
-                    WHERE rd.RouteID = @RouteID AND pa.PassengerID = @PassengerID";
-                cmd.Parameters.AddWithValue("@RouteID", routeId);
-                cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        vehicleId = reader.GetInt32(0);
-                        pickupTime = reader.IsDBNull(1) ? null : reader.GetString(1);
-                    }
-                    else
-                    {
-                        return (null, null);
-                    }
-                }
-            }
-
-            // Get vehicle details
-            Vehicle vehicle = null;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, u.Name
-                    FROM Vehicles v
-                    JOIN Users u ON v.UserID = u.UserID
-                    WHERE v.VehicleID = @VehicleID";
-                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        vehicle = new Vehicle
-                        {
-                            Id = reader.GetInt32(0),
-                            Capacity = reader.GetInt32(1),
-                            StartLatitude = reader.GetDouble(2),
-                            StartLongitude = reader.GetDouble(3),
-                            StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
-                            DriverName = reader.GetString(5)
-                        };
-                    }
-                }
-            }
-
-            DateTime? pickupDateTime = null;
-            if (pickupTime != null)
-            {
-                pickupDateTime = DateTime.Parse(pickupTime);
-            }
-            return (vehicle, pickupDateTime);
-        }
 
         /// <summary>
         /// Updates the estimated pickup times for a route
@@ -1893,43 +1804,7 @@ namespace claudpro.Services
             }
         }
 
-        /// <summary>
-        /// Gets scheduling settings from the database
-        /// </summary>
-        public async Task<(bool IsEnabled, DateTime ScheduledTime)> GetSchedulingSettingsAsync()
-        {
-            bool isEnabled = false;
-            DateTime scheduledTime = DateTime.Parse("00:00:00"); // Default to midnight
-
-            // Check if the settings table exists
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Settings'";
-                var result = await cmd.ExecuteScalarAsync();
-                if (result == null)
-                    return (isEnabled, scheduledTime); // Return defaults if table doesn't exist
-            }
-
-            // Get isEnabled setting
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'SchedulingEnabled'";
-                var result = await cmd.ExecuteScalarAsync();
-                if (result != null)
-                    isEnabled = result.ToString() == "1";
-            }
-
-            // Get scheduledTime setting
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'ScheduledTime'";
-                var result = await cmd.ExecuteScalarAsync();
-                if (result != null)
-                    scheduledTime = DateTime.Parse(result.ToString());
-            }
-
-            return (isEnabled, scheduledTime);
-        }
+      
 
         /// <summary>
         /// Gets the scheduling log entries
@@ -1979,16 +1854,297 @@ namespace claudpro.Services
             return result;
         }
 
-        /// <summary>
-        /// Logs a scheduling run
-        /// </summary>
+        
+
+
+
+
+
+
+
+
+
+
+
+        // Methods for passenger assignment management
+        public async Task<(Vehicle AssignedVehicle, DateTime? PickupTime)> GetPassengerAssignmentAsync(int userId, string date)
+        {
+            // Get passenger first
+            var passenger = await GetPassengerByUserIdAsync(userId);
+            if (passenger == null)
+            {
+                return (null, null);
+            }
+
+            // Get route for this date
+            int routeId;
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
+                cmd.Parameters.AddWithValue("@SolutionDate", date);
+
+                object result = await cmd.ExecuteScalarAsync();
+                if (result == null || !int.TryParse(result.ToString(), out routeId))
+                {
+                    return (null, null);
+                }
+            }
+
+            // Find passenger assignment
+            int vehicleId = 0;
+            string pickupTime = null;
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            SELECT rd.VehicleID, pa.EstimatedPickupTime
+            FROM PassengerAssignments pa
+            JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
+            WHERE rd.RouteID = @RouteID AND pa.PassengerID = @PassengerID";
+                cmd.Parameters.AddWithValue("@RouteID", routeId);
+                cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        vehicleId = reader.GetInt32(0);
+                        pickupTime = reader.IsDBNull(1) ? null : reader.GetString(1);
+                    }
+                    else
+                    {
+                        return (null, null);
+                    }
+                }
+            }
+
+            // Get vehicle details
+            Vehicle vehicle = null;
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, u.Name
+            FROM Vehicles v
+            JOIN Users u ON v.UserID = u.UserID
+            WHERE v.VehicleID = @VehicleID";
+                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        vehicle = new Vehicle
+                        {
+                            Id = reader.GetInt32(0),
+                            Capacity = reader.GetInt32(1),
+                            StartLatitude = reader.GetDouble(2),
+                            StartLongitude = reader.GetDouble(3),
+                            StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
+                            DriverName = reader.GetString(5)
+                        };
+                    }
+                }
+            }
+
+            DateTime? pickupDateTime = null;
+            if (pickupTime != null)
+            {
+                pickupDateTime = DateTime.Parse(pickupTime);
+            }
+            return (vehicle, pickupDateTime);
+        }
+
+        // Method for driver route details
+        public async Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)> GetDriverRouteAsync(int userId, string date)
+        {
+            // Get driver's vehicle first
+            var vehicle = await GetVehicleByUserIdAsync(userId);
+            if (vehicle == null)
+            {
+                return (null, null, null);
+            }
+
+            // Get route for this date
+            int routeId;
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
+                cmd.Parameters.AddWithValue("@SolutionDate", date);
+
+                object result = await cmd.ExecuteScalarAsync();
+                if (result == null || !int.TryParse(result.ToString(), out routeId))
+                {
+                    return (vehicle, new List<Passenger>(), null);
+                }
+            }
+
+            // Get route details for this vehicle
+            int routeDetailId;
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            SELECT RouteDetailID, TotalDistance, TotalTime 
+            FROM RouteDetails 
+            WHERE RouteID = @RouteID AND VehicleID = @VehicleID";
+                cmd.Parameters.AddWithValue("@RouteID", routeId);
+                cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        routeDetailId = reader.GetInt32(0);
+                        vehicle.TotalDistance = reader.GetDouble(1);
+                        vehicle.TotalTime = reader.GetDouble(2);
+                    }
+                    else
+                    {
+                        return (vehicle, new List<Passenger>(), null);
+                    }
+                }
+            }
+
+            // Get assigned passengers and pickup times
+            var passengers = new List<Passenger>();
+            DateTime? firstPickupTime = null;
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
+                   p.Name, p.Latitude, p.Longitude, p.Address
+            FROM PassengerAssignments pa
+            JOIN Passengers p ON pa.PassengerID = p.PassengerID
+            WHERE pa.RouteDetailID = @RouteDetailID
+            ORDER BY pa.StopOrder";
+                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        var passenger = new Passenger
+                        {
+                            Id = reader.GetInt32(0),
+                            Name = reader.GetString(3),
+                            Latitude = reader.GetDouble(4),
+                            Longitude = reader.GetDouble(5),
+                            Address = reader.IsDBNull(6) ? null : reader.GetString(6),
+                            EstimatedPickupTime = reader.IsDBNull(2) ? null : reader.GetString(2)
+                        };
+
+                        passengers.Add(passenger);
+
+                        if (passengers.Count == 1 && !reader.IsDBNull(2))
+                        {
+                            firstPickupTime = DateTime.Parse(reader.GetString(2));
+                        }
+                    }
+                }
+            }
+
+            vehicle.AssignedPassengers = passengers;
+            return (vehicle, passengers, firstPickupTime);
+        }
+
+        // Method for scheduling settings
+        public async Task<(bool IsEnabled, DateTime ScheduledTime)> GetSchedulingSettingsAsync()
+        {
+            bool isEnabled = false;
+            DateTime scheduledTime = DateTime.Parse("00:00:00"); // Default to midnight
+
+            // Check if the settings table exists
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Settings'";
+                var result = await cmd.ExecuteScalarAsync();
+                if (result == null)
+                    return (isEnabled, scheduledTime); // Return defaults if table doesn't exist
+            }
+
+            // Get isEnabled setting
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'SchedulingEnabled'";
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null)
+                    isEnabled = result.ToString() == "1";
+            }
+
+            // Get scheduledTime setting
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'ScheduledTime'";
+                var result = await cmd.ExecuteScalarAsync();
+                if (result != null)
+                    scheduledTime = DateTime.Parse(result.ToString());
+            }
+
+            return (isEnabled, scheduledTime);
+        }
+
+        // Update vehicle capacity method
+        public async Task<bool> UpdateVehicleCapacityAsync(int userId, int capacity)
+        {
+            var vehicle = await GetVehicleByUserIdAsync(userId);
+
+            if (vehicle == null)
+            {
+                // If the vehicle doesn't exist yet, create it with default location
+                await SaveDriverVehicleAsync(userId, capacity, 0, 0, "");
+                return true;
+            }
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            UPDATE Vehicles
+            SET Capacity = @Capacity
+            WHERE UserID = @UserID";
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                cmd.Parameters.AddWithValue("@Capacity", capacity);
+
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+                return rowsAffected > 0;
+            }
+        }
+
+        // Method for updating vehicle location
+        public async Task<bool> UpdateVehicleLocationAsync(int userId, double latitude, double longitude, string address = "")
+        {
+            var vehicle = await GetVehicleByUserIdAsync(userId);
+
+            if (vehicle == null)
+            {
+                // If the vehicle doesn't exist yet, create it with default capacity
+                await SaveDriverVehicleAsync(userId, 4, latitude, longitude, address);
+                return true;
+            }
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            UPDATE Vehicles
+            SET StartLatitude = @Latitude, StartLongitude = @Longitude, StartAddress = @Address
+            WHERE UserID = @UserID";
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                cmd.Parameters.AddWithValue("@Latitude", latitude);
+                cmd.Parameters.AddWithValue("@Longitude", longitude);
+                cmd.Parameters.AddWithValue("@Address", address ?? "");
+
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+                return rowsAffected > 0;
+            }
+        }
+
+        // Method for logging scheduling runs
         public async Task LogSchedulingRunAsync(DateTime runTime, string status, int routesGenerated, int passengersAssigned, string errorMessage = null)
         {
             using (var cmd = new SQLiteCommand(connection))
             {
                 cmd.CommandText = @"
-                    INSERT INTO SchedulingLog (RunTime, Status, RoutesGenerated, PassengersAssigned, ErrorMessage)
-                    VALUES (@RunTime, @Status, @RoutesGenerated, @PassengersAssigned, @ErrorMessage)";
+            INSERT INTO SchedulingLog (RunTime, Status, RoutesGenerated, PassengersAssigned, ErrorMessage)
+            VALUES (@RunTime, @Status, @RoutesGenerated, @PassengersAssigned, @ErrorMessage)";
                 cmd.Parameters.AddWithValue("@RunTime", runTime.ToString("yyyy-MM-dd HH:mm:ss"));
                 cmd.Parameters.AddWithValue("@Status", status);
                 cmd.Parameters.AddWithValue("@RoutesGenerated", routesGenerated);
@@ -1998,7 +2154,6 @@ namespace claudpro.Services
                 await cmd.ExecuteNonQueryAsync();
             }
         }
-
         #endregion
 
         #region Helper Methods
