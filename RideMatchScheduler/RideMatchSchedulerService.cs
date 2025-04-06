@@ -1,7 +1,4 @@
-﻿// Fix RideMatchSchedulerService.cs to properly handle Windows Service events
-// and to have better error handling
-
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.ServiceProcess;
@@ -253,22 +250,84 @@ namespace RideMatchScheduler
                         Log($"Algorithm completed and saved as route #{routeId}");
                         Log($"Assigned {solution.Vehicles.Sum(v => v.AssignedPassengers?.Count ?? 0)} passengers to {solution.Vehicles.Count(v => v.AssignedPassengers?.Count > 0)} vehicles");
 
-                        // TODO: Add code here to send notifications to users
+                        // Optional: Set up notifications for drivers and passengers
+                        await LogSchedulingDetailsAsync(solution, vehicles, passengers);
                     }
                     else
                     {
                         Log("Algorithm failed to find a valid solution");
+                        await dbService.LogSchedulingRunAsync(DateTime.Now, "Failed", 0, 0, "Algorithm failed to find a valid solution");
                     }
                 }
                 else
                 {
                     Log("No passengers or vehicles available for tomorrow - skipping algorithm run");
+                    await dbService.LogSchedulingRunAsync(DateTime.Now, "Skipped", 0, 0,
+                        $"Insufficient participants: {passengers.Count} passengers, {vehicles.Count} vehicles");
                 }
             }
             catch (Exception ex)
             {
                 Log($"Error running algorithm: {ex.Message}");
                 Log($"Stack trace: {ex.StackTrace}");
+
+                try
+                {
+                    await dbService.LogSchedulingRunAsync(DateTime.Now, "Error", 0, 0, ex.Message);
+                }
+                catch
+                {
+                    // Just in case writing to the database also fails
+                }
+            }
+        }
+
+        private async Task LogSchedulingDetailsAsync(Solution solution, List<Vehicle> allVehicles, List<Passenger> allPassengers)
+        {
+            try
+            {
+                int assignedVehicles = solution.Vehicles.Count(v => v.AssignedPassengers?.Count > 0);
+                int assignedPassengers = solution.Vehicles.Sum(v => v.AssignedPassengers?.Count ?? 0);
+
+                // Log the scheduling run to the database
+                await dbService.LogSchedulingRunAsync(
+                    DateTime.Now,
+                    "Success",
+                    assignedVehicles,
+                    assignedPassengers,
+                    $"Assigned {assignedPassengers} of {allPassengers.Count} passengers to {assignedVehicles} of {allVehicles.Count} vehicles"
+                );
+
+                // Log details about the solution
+                Log($"Generated route assigns {assignedPassengers} passengers to {assignedVehicles} vehicles");
+
+                foreach (var vehicle in solution.Vehicles.Where(v => v.AssignedPassengers?.Count > 0))
+                {
+                    Log($"Vehicle {vehicle.Id} (Driver: {vehicle.DriverName}) assigned {vehicle.AssignedPassengers.Count} passengers");
+                    Log($"  Route distance: {vehicle.TotalDistance:F2} km, time: {vehicle.TotalTime:F2} minutes");
+                }
+
+                var unassignedPassengers = allPassengers
+                    .Where(p => !solution.Vehicles.Any(v => v.AssignedPassengers?.Any(ap => ap.Id == p.Id) ?? false))
+                    .ToList();
+
+                if (unassignedPassengers.Count > 0)
+                {
+                    Log($"Warning: {unassignedPassengers.Count} passengers could not be assigned:");
+                    foreach (var passenger in unassignedPassengers.Take(10)) // Limit to first 10 for brevity
+                    {
+                        Log($"  - {passenger.Name} (ID: {passenger.Id})");
+                    }
+
+                    if (unassignedPassengers.Count > 10)
+                    {
+                        Log($"  ... and {unassignedPassengers.Count - 10} more");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Error logging scheduling details: {ex.Message}");
             }
         }
 

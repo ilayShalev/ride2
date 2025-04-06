@@ -34,6 +34,10 @@ namespace claudpro
         private AddressSearchControl addressSearchControl;
         private Button setLocationButton;
 
+        // Fields for vehicle capacity
+        private NumericUpDown capacityNumericUpDown;
+        private Button updateCapacityButton;
+
         // Data models
         private Vehicle vehicle;
         private List<Passenger> assignedPassengers = new List<Passenger>();
@@ -129,8 +133,40 @@ namespace claudpro
                 availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
                 leftPanel.Controls.Add(availabilityCheckBox);
 
-                var statusPanel = ControlExtensions.CreatePanel(
+                // Vehicle capacity section
+                leftPanel.Controls.Add(ControlExtensions.CreateLabel(
+                    "Vehicle Capacity:",
                     new Point(20, 90),
+                    new Size(150, 20),
+                    new Font("Arial", 10, FontStyle.Bold)
+                ));
+
+                leftPanel.Controls.Add(ControlExtensions.CreateLabel(
+                    "Number of seats:",
+                    new Point(20, 120),
+                    new Size(150, 20)
+                ));
+
+                capacityNumericUpDown = new NumericUpDown
+                {
+                    Location = new Point(180, 120),
+                    Size = new Size(80, 25),
+                    Minimum = 1,
+                    Maximum = 20,
+                    Value = 4 // Default 4 seats
+                };
+                leftPanel.Controls.Add(capacityNumericUpDown);
+
+                updateCapacityButton = ControlExtensions.CreateButton(
+                    "Update Capacity",
+                    new Point(180, 150),
+                    new Size(150, 30),
+                    async (s, e) => await UpdateVehicleCapacityAsync()
+                );
+                leftPanel.Controls.Add(updateCapacityButton);
+
+                var statusPanel = ControlExtensions.CreatePanel(
+                    new Point(20, 190),
                     new Size(310, 2),
                     BorderStyle.FixedSingle
                 );
@@ -140,14 +176,14 @@ namespace claudpro
                 // Route details section
                 leftPanel.Controls.Add(ControlExtensions.CreateLabel(
                     "Your Route Details:",
-                    new Point(20, 110),
+                    new Point(20, 210),
                     new Size(200, 20),
                     new Font("Arial", 10, FontStyle.Bold)
                 ));
 
                 routeDetailsTextBox = ControlExtensions.CreateRichTextBox(
-                    new Point(20, 140),
-                    new Size(310, 200),
+                    new Point(20, 240),
+                    new Size(310, 160),
                     true
                 );
                 leftPanel.Controls.Add(routeDetailsTextBox);
@@ -200,7 +236,7 @@ namespace claudpro
             {
                 // Add a separator panel
                 var locationPanel = ControlExtensions.CreatePanel(
-                    new Point(20, 350),
+                    new Point(20, 410),
                     new Size(310, 2),
                     BorderStyle.FixedSingle
                 );
@@ -210,7 +246,7 @@ namespace claudpro
                 // Add location setting section title
                 leftPanel.Controls.Add(ControlExtensions.CreateLabel(
                     "Set Your Starting Location:",
-                    new Point(20, 360),
+                    new Point(20, 420),
                     new Size(200, 20),
                     new Font("Arial", 10, FontStyle.Bold)
                 ));
@@ -218,7 +254,7 @@ namespace claudpro
                 // Add a button for setting location
                 setLocationButton = ControlExtensions.CreateButton(
                     "Set Location on Map",
-                    new Point(20, 390),
+                    new Point(20, 450),
                     new Size(150, 30),
                     (s, e) => EnableMapLocationSelection()
                 );
@@ -227,8 +263,8 @@ namespace claudpro
                 // Add address search control
                 addressSearchControl = new AddressSearchControl(mapService, gMapControl)
                 {
-                    Location = new Point(20, 430),
-                    Size = new Size(310, 50)
+                    Location = new Point(20, 490),
+                    Size = new Size(310, 30)
                 };
                 addressSearchControl.AddressFound += AddressSearchControl_AddressFound;
                 leftPanel.Controls.Add(addressSearchControl);
@@ -236,7 +272,7 @@ namespace claudpro
                 // Add instructions label
                 locationInstructionsLabel = ControlExtensions.CreateLabel(
                     "Click on the map to set your starting location",
-                    new Point(20, 490),
+                    new Point(20, 450),
                     new Size(310, 20),
                     null,
                     ContentAlignment.MiddleCenter
@@ -283,12 +319,23 @@ namespace claudpro
                 {
                     routeDetailsTextBox.Clear();
                     routeDetailsTextBox.AppendText("No vehicle is assigned to you.\n");
-                    routeDetailsTextBox.AppendText("Please contact your administrator to set up your vehicle.\n");
+                    routeDetailsTextBox.AppendText("Please set your vehicle information.\n");
+
+                    // Initialize with default values
+                    vehicle = new Vehicle
+                    {
+                        UserId = userId,
+                        Capacity = 4,
+                        IsAvailableTomorrow = true,
+                        DriverName = username
+                    };
+
                     return;
                 }
 
-                // Update availability checkbox
+                // Update UI controls to reflect vehicle data
                 availabilityCheckBox.Checked = vehicle.IsAvailableTomorrow;
+                capacityNumericUpDown.Value = vehicle.Capacity;
 
                 // Get today's date in the format used by the database
                 string today = DateTime.Now.ToString("yyyy-MM-dd");
@@ -335,13 +382,16 @@ namespace claudpro
                 var routesOverlay = new GMapOverlay("routes");
                 var destinationOverlay = new GMapOverlay("destination");
 
-                // Show vehicle marker
-                var vehicleMarker = MapOverlays.CreateVehicleMarker(vehicle);
-                vehiclesOverlay.Markers.Add(vehicleMarker);
+                // Show vehicle marker if location is set
+                if (vehicle.StartLatitude != 0 || vehicle.StartLongitude != 0)
+                {
+                    var vehicleMarker = MapOverlays.CreateVehicleMarker(vehicle);
+                    vehiclesOverlay.Markers.Add(vehicleMarker);
 
-                // Center map on vehicle location
-                gMapControl.Position = new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude);
-                gMapControl.Zoom = 13;
+                    // Center map on vehicle location
+                    gMapControl.Position = new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude);
+                    gMapControl.Zoom = 13;
+                }
 
                 // Show passenger markers and create route points
                 if (assignedPassengers != null && assignedPassengers.Count > 0)
@@ -381,7 +431,8 @@ namespace claudpro
                                 gMapControl.Overlays.Add(newDestOverlay);
 
                                 // Create route if we have passengers
-                                if (assignedPassengers != null && assignedPassengers.Count > 0)
+                                if (assignedPassengers != null && assignedPassengers.Count > 0 &&
+                                    (vehicle.StartLatitude != 0 || vehicle.StartLongitude != 0))
                                 {
                                     var routePoints = new List<PointLatLng>();
                                     routePoints.Add(new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude));
@@ -436,10 +487,14 @@ namespace claudpro
             routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
             routeDetailsTextBox.AppendText("Your Vehicle Details:\n");
             routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-            routeDetailsTextBox.AppendText($"Vehicle ID: {vehicle.Id}\n");
-            routeDetailsTextBox.AppendText($"Capacity: {vehicle.Capacity}\n");
+            routeDetailsTextBox.AppendText($"Capacity: {vehicle.Capacity} seats\n");
 
-            if (!string.IsNullOrEmpty(vehicle.StartAddress))
+            if (vehicle.StartLatitude == 0 && vehicle.StartLongitude == 0)
+            {
+                routeDetailsTextBox.AppendText("Starting Location: Not set\n\n");
+                routeDetailsTextBox.AppendText("Please set your starting location using the options below.\n");
+            }
+            else if (!string.IsNullOrEmpty(vehicle.StartAddress))
             {
                 routeDetailsTextBox.AppendText($"Starting Location: {vehicle.StartAddress}\n\n");
             }
@@ -528,6 +583,45 @@ namespace claudpro
             }
         }
 
+        private async Task UpdateVehicleCapacityAsync()
+        {
+            if (vehicle == null || capacityNumericUpDown == null)
+                return;
+
+            try
+            {
+                int newCapacity = (int)capacityNumericUpDown.Value;
+
+                bool success = await dbService.UpdateVehicleCapacityAsync(userId, newCapacity);
+
+                if (success)
+                {
+                    vehicle.Capacity = newCapacity;
+                    MessageBox.Show($"Vehicle capacity updated to {newCapacity} seats.",
+                        "Capacity Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    // Refresh route details to show the updated capacity
+                    UpdateRouteDetailsText(pickupTime);
+                }
+                else
+                {
+                    MessageBox.Show("Failed to update vehicle capacity. Please try again.",
+                        "Update Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                    // Revert numeric control to match database state
+                    capacityNumericUpDown.Value = vehicle.Capacity;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error updating vehicle capacity: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                // Revert numeric control to match database state
+                capacityNumericUpDown.Value = vehicle.Capacity;
+            }
+        }
+
         /// <summary>
         /// Enables map location selection mode
         /// </summary>
@@ -537,6 +631,7 @@ namespace claudpro
             {
                 isSettingLocation = true;
                 locationInstructionsLabel.Visible = true;
+                setLocationButton.Visible = false;
 
                 // Change cursor to indicate map is clickable
                 gMapControl.Cursor = Cursors.Hand;
@@ -580,6 +675,7 @@ namespace claudpro
                             UpdateVehicleLocation(point.Lat, point.Lng, address);
                             isSettingLocation = false;
                             locationInstructionsLabel.Visible = false;
+                            setLocationButton.Visible = true;
                             gMapControl.Cursor = Cursors.Default;
 
                             // Remove the click handler
@@ -594,6 +690,7 @@ namespace claudpro
                                 "Geocoding Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                             isSettingLocation = false;
                             locationInstructionsLabel.Visible = false;
+                            setLocationButton.Visible = true;
                             gMapControl.Cursor = Cursors.Default;
 
                             // Remove the click handler
@@ -608,6 +705,7 @@ namespace claudpro
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 isSettingLocation = false;
                 locationInstructionsLabel.Visible = false;
+                setLocationButton.Visible = true;
                 gMapControl.Cursor = Cursors.Default;
 
                 // Remove the click handler
@@ -632,28 +730,48 @@ namespace claudpro
                 }
 
                 // Update vehicle in database
-                if (vehicle == null)
-                {
-                    MessageBox.Show("No vehicle is assigned to you. Please contact your administrator.",
-                        "No Vehicle", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
+                bool success;
 
-                bool success = await dbService.UpdateVehicleAsync(
-                    vehicle.Id,
-                    vehicle.Capacity,
-                    latitude,
-                    longitude,
-                    address
-                );
+                if (vehicle == null || vehicle.Id == 0)
+                {
+                    // Create a new vehicle
+                    int vehicleId = await dbService.SaveDriverVehicleAsync(
+                        userId,
+                        capacityNumericUpDown != null ? (int)capacityNumericUpDown.Value : 4,
+                        latitude,
+                        longitude,
+                        address
+                    );
+
+                    success = vehicleId > 0;
+
+                    if (success)
+                    {
+                        // Load the newly created vehicle
+                        vehicle = await dbService.GetVehicleByUserIdAsync(userId);
+                    }
+                }
+                else
+                {
+                    // Update existing vehicle
+                    success = await dbService.UpdateVehicleLocationAsync(
+                        userId,
+                        latitude,
+                        longitude,
+                        address
+                    );
+
+                    if (success)
+                    {
+                        // Update local vehicle data
+                        vehicle.StartLatitude = latitude;
+                        vehicle.StartLongitude = longitude;
+                        vehicle.StartAddress = address;
+                    }
+                }
 
                 if (success)
                 {
-                    // Update local vehicle data
-                    vehicle.StartLatitude = latitude;
-                    vehicle.StartLongitude = longitude;
-                    vehicle.StartAddress = address;
-
                     // Update address in search control
                     if (addressSearchControl != null)
                         addressSearchControl.Address = address;
@@ -666,7 +784,7 @@ namespace claudpro
                     ShowRouteOnMap();
 
                     // Refresh vehicle details
-                    await LoadDriverDataAsync();
+                    UpdateRouteDetailsText(pickupTime);
                 }
                 else
                 {

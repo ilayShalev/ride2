@@ -1,26 +1,36 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace claudpro.Models
 {
     public class Vehicle
     {
+        // Basic vehicle information
         public int Id { get; set; }
+
+        // Link to user (driver)
+        public int UserId { get; set; }
+
+        // Capacity/number of seats
         public int Capacity { get; set; }
+
+        // Starting location
         public double StartLatitude { get; set; }
         public double StartLongitude { get; set; }
         public string StartAddress { get; set; }
+
+        // Assigned passengers for routing
         public List<Passenger> AssignedPassengers { get; set; } = new List<Passenger>();
+
+        // Route metrics
         public double TotalDistance { get; set; }
         public double TotalTime { get; set; }
 
-        // New properties for database integration
-        public int UserId { get; set; }
-        public string DriverName { get; set; }
+        // Availability for scheduling
         public bool IsAvailableTomorrow { get; set; } = true;
+
+        // Driver details (derived from the user)
+        public string DriverName { get; set; }
 
         // Additional properties for UI display
         public string Model { get; set; } = "Standard Vehicle";

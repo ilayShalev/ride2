@@ -62,14 +62,14 @@ namespace claudpro.Services
                     )";
                 cmd.ExecuteNonQuery();
 
-                // Create Vehicles table
+                // Create Vehicles table with UserId foreign key
                 cmd.CommandText = @"
                     CREATE TABLE IF NOT EXISTS Vehicles (
                         VehicleID INTEGER PRIMARY KEY AUTOINCREMENT,
-                        UserID INTEGER,
-                        Capacity INTEGER NOT NULL,
-                        StartLatitude REAL NOT NULL,
-                        StartLongitude REAL NOT NULL,
+                        UserID INTEGER NOT NULL UNIQUE,  -- UNIQUE constraint ensures one-to-one relationship
+                        Capacity INTEGER NOT NULL DEFAULT 4,
+                        StartLatitude REAL NOT NULL DEFAULT 0,
+                        StartLongitude REAL NOT NULL DEFAULT 0,
                         StartAddress TEXT,
                         IsAvailableTomorrow INTEGER DEFAULT 1,
                         FOREIGN KEY (UserID) REFERENCES Users(UserID)
@@ -880,6 +880,118 @@ namespace claudpro.Services
                     transaction.Rollback();
                     throw;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Creates or updates a vehicle for a driver
+        /// </summary>
+        public async Task<int> SaveDriverVehicleAsync(int userId, int capacity, double startLatitude, double startLongitude, string startAddress = "")
+        {
+            // First check if the driver already has a vehicle
+            var existingVehicle = await GetVehicleByUserIdAsync(userId);
+
+            if (existingVehicle != null)
+            {
+                // Update existing vehicle
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = @"
+                UPDATE Vehicles
+                SET Capacity = @Capacity, StartLatitude = @StartLatitude, 
+                    StartLongitude = @StartLongitude, StartAddress = @StartAddress
+                WHERE UserID = @UserID";
+                    cmd.Parameters.AddWithValue("@UserID", userId);
+                    cmd.Parameters.AddWithValue("@Capacity", capacity);
+                    cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
+                    cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
+                    cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
+
+                    await cmd.ExecuteNonQueryAsync();
+                    return existingVehicle.Id;
+                }
+            }
+            else
+            {
+                // Create a new vehicle
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = @"
+                INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, StartAddress, IsAvailableTomorrow)
+                VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, @StartAddress, 1);
+                SELECT last_insert_rowid();";
+                    cmd.Parameters.AddWithValue("@UserID", userId);
+                    cmd.Parameters.AddWithValue("@Capacity", capacity);
+                    cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
+                    cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
+                    cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
+
+                    object result = await cmd.ExecuteScalarAsync();
+                    if (result != null && int.TryParse(result.ToString(), out int vehicleId))
+                    {
+                        return vehicleId;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// Updates a vehicle's location information
+        /// </summary>
+        public async Task<bool> UpdateVehicleLocationAsync(int userId, double latitude, double longitude, string address = "")
+        {
+            var vehicle = await GetVehicleByUserIdAsync(userId);
+
+            if (vehicle == null)
+            {
+                // If the vehicle doesn't exist yet, create it with default capacity
+                await SaveDriverVehicleAsync(userId, 4, latitude, longitude, address);
+                return true;
+            }
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            UPDATE Vehicles
+            SET StartLatitude = @Latitude, StartLongitude = @Longitude, StartAddress = @Address
+            WHERE UserID = @UserID";
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                cmd.Parameters.AddWithValue("@Latitude", latitude);
+                cmd.Parameters.AddWithValue("@Longitude", longitude);
+                cmd.Parameters.AddWithValue("@Address", address ?? "");
+
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+                return rowsAffected > 0;
+            }
+        }
+
+        /// <summary>
+        /// Updates a vehicle's capacity (number of seats)
+        /// </summary>
+        public async Task<bool> UpdateVehicleCapacityAsync(int userId, int capacity)
+        {
+            var vehicle = await GetVehicleByUserIdAsync(userId);
+
+            if (vehicle == null)
+            {
+                // If the vehicle doesn't exist yet, create it with default location
+                await SaveDriverVehicleAsync(userId, capacity, 0, 0, "");
+                return true;
+            }
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            UPDATE Vehicles
+            SET Capacity = @Capacity
+            WHERE UserID = @UserID";
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                cmd.Parameters.AddWithValue("@Capacity", capacity);
+
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+                return rowsAffected > 0;
             }
         }
 
