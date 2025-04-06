@@ -39,22 +39,13 @@ namespace claudpro
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.ClientSize = new System.Drawing.Size(1200, 800);
             this.Name = "AdminForm";
-            this.Text = "AdminForm";
+            this.Text = "RideMatch - Administrator Interface";
             this.Load += new System.EventHandler(this.AdminForm_Load);
             this.ResumeLayout(false);
-
         }
 
         #endregion
-
-        private void AdminForm_Load(object sender, EventArgs e)
-        {
-            // Initialization code for AdminForm
-        }
-
-
-
     }
 }

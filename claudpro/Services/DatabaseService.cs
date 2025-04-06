@@ -34,6 +34,14 @@ namespace claudpro.Services
         }
 
         /// <summary>
+        /// Gets the SQLite connection for direct queries
+        /// </summary>
+        public SQLiteConnection GetConnection()
+        {
+            return connection;
+        }
+
+        /// <summary>
         /// Creates the database schema if it doesn't exist
         /// </summary>
         private void CreateDatabase()
@@ -126,6 +134,27 @@ namespace claudpro.Services
                         EstimatedPickupTime TEXT,
                         FOREIGN KEY (RouteDetailID) REFERENCES RouteDetails(RouteDetailID),
                         FOREIGN KEY (PassengerID) REFERENCES Passengers(PassengerID)
+                    )";
+                cmd.ExecuteNonQuery();
+
+                // Create Settings table
+                cmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS Settings (
+                        SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        SettingName TEXT NOT NULL UNIQUE,
+                        SettingValue TEXT NOT NULL
+                    )";
+                cmd.ExecuteNonQuery();
+
+                // Create SchedulingLog table
+                cmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS SchedulingLog (
+                        LogID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        RunTime TEXT NOT NULL,
+                        Status TEXT NOT NULL,
+                        RoutesGenerated INTEGER,
+                        PassengersAssigned INTEGER,
+                        ErrorMessage TEXT
                     )";
                 cmd.ExecuteNonQuery();
 
@@ -231,6 +260,28 @@ namespace claudpro.Services
         }
 
         /// <summary>
+        /// Updates a user's profile information including user type
+        /// </summary>
+        public async Task<bool> UpdateUserProfileAsync(int userId, string userType, string name, string email, string phone)
+        {
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    UPDATE Users 
+                    SET UserType = @UserType, Name = @Name, Email = @Email, Phone = @Phone
+                    WHERE UserID = @UserID";
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                cmd.Parameters.AddWithValue("@UserType", userType);
+                cmd.Parameters.AddWithValue("@Name", name);
+                cmd.Parameters.AddWithValue("@Email", email ?? "");
+                cmd.Parameters.AddWithValue("@Phone", phone ?? "");
+
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+                return rowsAffected > 0;
+            }
+        }
+
+        /// <summary>
         /// Changes a user's password
         /// </summary>
         public async Task<bool> ChangePasswordAsync(int userId, string newPassword)
@@ -272,6 +323,128 @@ namespace claudpro.Services
             }
 
             return (null, null, null, null, null);
+        }
+
+        /// <summary>
+        /// Gets all users from the database
+        /// </summary>
+        public async Task<List<(int Id, string Username, string UserType, string Name, string Email, string Phone)>> GetAllUsersAsync()
+        {
+            var users = new List<(int Id, string Username, string UserType, string Name, string Email, string Phone)>();
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    SELECT UserID, Username, UserType, Name, Email, Phone 
+                    FROM Users 
+                    ORDER BY UserType, Username";
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        users.Add((
+                            reader.GetInt32(0),
+                            reader.GetString(1),
+                            reader.GetString(2),
+                            reader.GetString(3),
+                            reader.IsDBNull(4) ? "" : reader.GetString(4),
+                            reader.IsDBNull(5) ? "" : reader.GetString(5)
+                        ));
+                    }
+                }
+            }
+
+            return users;
+        }
+
+        /// <summary>
+        /// Deletes a user by ID
+        /// </summary>
+        public async Task<bool> DeleteUserAsync(int userId)
+        {
+            // Begin transaction to handle cascading deletes
+            using (var transaction = connection.BeginTransaction())
+            {
+                try
+                {
+                    // Delete associated vehicle if exists
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = "DELETE FROM Vehicles WHERE UserID = @UserID";
+                        cmd.Parameters.AddWithValue("@UserID", userId);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    // Delete associated passenger if exists
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = "DELETE FROM Passengers WHERE UserID = @UserID";
+                        cmd.Parameters.AddWithValue("@UserID", userId);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    // Delete the user
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = "DELETE FROM Users WHERE UserID = @UserID";
+                        cmd.Parameters.AddWithValue("@UserID", userId);
+                        int rowsAffected = await cmd.ExecuteNonQueryAsync();
+
+                        if (rowsAffected == 0)
+                        {
+                            // No user was deleted
+                            transaction.Rollback();
+                            return false;
+                        }
+                    }
+
+                    // Commit the transaction
+                    transaction.Commit();
+                    return true;
+                }
+                catch (Exception)
+                {
+                    // Rollback on error
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets all users with a specific user type
+        /// </summary>
+        public async Task<List<(int Id, string Username, string Name)>> GetUsersByTypeAsync(string userType)
+        {
+            var users = new List<(int Id, string Username, string Name)>();
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    SELECT UserID, Username, Name
+                    FROM Users
+                    WHERE UserType = @UserType
+                    ORDER BY Username";
+                cmd.Parameters.AddWithValue("@UserType", userType);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        users.Add((
+                            reader.GetInt32(0),
+                            reader.GetString(1),
+                            reader.GetString(2)
+                        ));
+                    }
+                }
+            }
+
+            return users;
         }
 
         #endregion
@@ -345,6 +518,44 @@ namespace claudpro.Services
         }
 
         /// <summary>
+        /// Gets all vehicles in the database, not just those available for tomorrow
+        /// </summary>
+        public async Task<List<Vehicle>> GetAllVehiclesAsync()
+        {
+            var vehicles = new List<Vehicle>();
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
+                           v.StartAddress, v.IsAvailableTomorrow, u.Name
+                    FROM Vehicles v
+                    LEFT JOIN Users u ON v.UserID = u.UserID";
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        vehicles.Add(new Vehicle
+                        {
+                            Id = reader.GetInt32(0),
+                            UserId = reader.GetInt32(1),
+                            Capacity = reader.GetInt32(2),
+                            StartLatitude = reader.GetDouble(3),
+                            StartLongitude = reader.GetDouble(4),
+                            StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
+                            IsAvailableTomorrow = reader.GetInt32(6) == 1,
+                            DriverName = reader.IsDBNull(7) ? null : reader.GetString(7),
+                            AssignedPassengers = new List<Passenger>()
+                        });
+                    }
+                }
+            }
+
+            return vehicles;
+        }
+
+        /// <summary>
         /// Gets all vehicles that are available for tomorrow
         /// </summary>
         public async Task<List<Vehicle>> GetAvailableVehiclesAsync()
@@ -354,7 +565,7 @@ namespace claudpro.Services
             using (var cmd = new SQLiteCommand(connection))
             {
                 cmd.CommandText = @"
-                    SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, u.Name
+                    SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, u.Name
                     FROM Vehicles v
                     JOIN Users u ON v.UserID = u.UserID
                     WHERE v.IsAvailableTomorrow = 1";
@@ -366,11 +577,12 @@ namespace claudpro.Services
                         vehicles.Add(new Vehicle
                         {
                             Id = reader.GetInt32(0),
-                            Capacity = reader.GetInt32(1),
-                            StartLatitude = reader.GetDouble(2),
-                            StartLongitude = reader.GetDouble(3),
-                            StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
-                            DriverName = reader.GetString(5),
+                            UserId = reader.GetInt32(1),
+                            Capacity = reader.GetInt32(2),
+                            StartLatitude = reader.GetDouble(3),
+                            StartLongitude = reader.GetDouble(4),
+                            StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
+                            DriverName = reader.GetString(6),
                             AssignedPassengers = new List<Passenger>()
                         });
                     }
@@ -400,6 +612,7 @@ namespace claudpro.Services
                         return new Vehicle
                         {
                             Id = reader.GetInt32(0),
+                            UserId = userId,
                             Capacity = reader.GetInt32(1),
                             StartLatitude = reader.GetDouble(2),
                             StartLongitude = reader.GetDouble(3),
@@ -414,8 +627,43 @@ namespace claudpro.Services
             return null;
         }
 
-        // Add this method to the DatabaseService class
-        // Place this in the #region Vehicle Methods section
+        /// <summary>
+        /// Gets a vehicle by its ID
+        /// </summary>
+        public async Task<Vehicle> GetVehicleByIdAsync(int vehicleId)
+        {
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
+                           v.StartAddress, v.IsAvailableTomorrow, u.Name
+                    FROM Vehicles v
+                    LEFT JOIN Users u ON v.UserID = u.UserID
+                    WHERE v.VehicleID = @VehicleID";
+                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        return new Vehicle
+                        {
+                            Id = reader.GetInt32(0),
+                            UserId = reader.GetInt32(1),
+                            Capacity = reader.GetInt32(2),
+                            StartLatitude = reader.GetDouble(3),
+                            StartLongitude = reader.GetDouble(4),
+                            StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
+                            IsAvailableTomorrow = reader.GetInt32(6) == 1,
+                            DriverName = reader.IsDBNull(7) ? null : reader.GetString(7),
+                            AssignedPassengers = new List<Passenger>()
+                        };
+                    }
+                }
+            }
+
+            return null;
+        }
 
         /// <summary>
         /// Gets the assigned vehicle for a passenger by passengerId
@@ -444,10 +692,10 @@ namespace claudpro.Services
             using (var cmd = new SQLiteCommand(connection))
             {
                 cmd.CommandText = @"
-            SELECT rd.VehicleID
-            FROM PassengerAssignments pa
-            JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
-            WHERE rd.RouteID = @RouteID AND pa.PassengerID = @PassengerID";
+                    SELECT rd.VehicleID
+                    FROM PassengerAssignments pa
+                    JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
+                    WHERE rd.RouteID = @RouteID AND pa.PassengerID = @PassengerID";
                 cmd.Parameters.AddWithValue("@RouteID", routeId);
                 cmd.Parameters.AddWithValue("@PassengerID", passengerId);
 
@@ -463,11 +711,11 @@ namespace claudpro.Services
             using (var cmd = new SQLiteCommand(connection))
             {
                 cmd.CommandText = @"
-            SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, 
-                   u.Name, v.IsAvailableTomorrow
-            FROM Vehicles v
-            LEFT JOIN Users u ON v.UserID = u.UserID
-            WHERE v.VehicleID = @VehicleID";
+                    SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, 
+                           u.Name, v.IsAvailableTomorrow
+                    FROM Vehicles v
+                    LEFT JOIN Users u ON v.UserID = u.UserID
+                    WHERE v.VehicleID = @VehicleID";
                 cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
 
                 using (var reader = await cmd.ExecuteReaderAsync())
@@ -498,12 +746,12 @@ namespace claudpro.Services
                 using (var cmd = new SQLiteCommand(connection))
                 {
                     cmd.CommandText = @"
-                SELECT p.PassengerID, p.Name, p.Latitude, p.Longitude, p.Address
-                FROM PassengerAssignments pa
-                JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
-                JOIN Passengers p ON pa.PassengerID = p.PassengerID
-                WHERE rd.RouteID = @RouteID AND rd.VehicleID = @VehicleID
-                ORDER BY pa.StopOrder";
+                        SELECT p.PassengerID, p.Name, p.Latitude, p.Longitude, p.Address
+                        FROM PassengerAssignments pa
+                        JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
+                        JOIN Passengers p ON pa.PassengerID = p.PassengerID
+                        WHERE rd.RouteID = @RouteID AND rd.VehicleID = @VehicleID
+                        ORDER BY pa.StopOrder";
                     cmd.Parameters.AddWithValue("@RouteID", routeId);
                     cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
 
@@ -525,6 +773,114 @@ namespace claudpro.Services
             }
 
             return vehicle;
+        }
+
+        /// <summary>
+        /// Creates a new vehicle for a user or updates an existing one
+        /// </summary>
+        public async Task<int> SaveVehicleAsync(int userId, int vehicleId, int capacity, double startLatitude, double startLongitude, string startAddress = "")
+        {
+            if (vehicleId > 0)
+            {
+                // Update existing vehicle
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = @"
+                        UPDATE Vehicles
+                        SET Capacity = @Capacity, StartLatitude = @StartLatitude, StartLongitude = @StartLongitude, StartAddress = @StartAddress
+                        WHERE VehicleID = @VehicleID";
+                    cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                    cmd.Parameters.AddWithValue("@Capacity", capacity);
+                    cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
+                    cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
+                    cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
+
+                    await cmd.ExecuteNonQueryAsync();
+                    return vehicleId;
+                }
+            }
+            else
+            {
+                // Create a new vehicle
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = @"
+                        INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, StartAddress, IsAvailableTomorrow)
+                        VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, @StartAddress, 1);
+                        SELECT last_insert_rowid();";
+                    cmd.Parameters.AddWithValue("@UserID", userId);
+                    cmd.Parameters.AddWithValue("@Capacity", capacity);
+                    cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
+                    cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
+                    cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
+
+                    object result = await cmd.ExecuteScalarAsync();
+                    if (result != null && int.TryParse(result.ToString(), out int newVehicleId))
+                    {
+                        return newVehicleId;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// Deletes a vehicle from the database
+        /// </summary>
+        public async Task<bool> DeleteVehicleAsync(int vehicleId)
+        {
+            using (var transaction = connection.BeginTransaction())
+            {
+                try
+                {
+                    // Delete any route assignments for this vehicle
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = @"
+                            DELETE FROM PassengerAssignments
+                            WHERE RouteDetailID IN (
+                                SELECT RouteDetailID FROM RouteDetails
+                                WHERE VehicleID = @VehicleID
+                            )";
+                        cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    // Delete route details
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = "DELETE FROM RouteDetails WHERE VehicleID = @VehicleID";
+                        cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    // Delete the vehicle
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = "DELETE FROM Vehicles WHERE VehicleID = @VehicleID";
+                        cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                        int result = await cmd.ExecuteNonQueryAsync();
+
+                        if (result == 0)
+                        {
+                            transaction.Rollback();
+                            return false;
+                        }
+                    }
+
+                    transaction.Commit();
+                    return true;
+                }
+                catch (Exception)
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
         }
 
         #endregion
@@ -630,6 +986,40 @@ namespace claudpro.Services
         }
 
         /// <summary>
+        /// Gets all passengers in the database, not just those available for tomorrow
+        /// </summary>
+        public async Task<List<Passenger>> GetAllPassengersAsync()
+        {
+            var passengers = new List<Passenger>();
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    SELECT PassengerID, UserID, Name, Latitude, Longitude, Address, IsAvailableTomorrow
+                    FROM Passengers";
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        passengers.Add(new Passenger
+                        {
+                            Id = reader.GetInt32(0),
+                            UserId = reader.GetInt32(1),
+                            Name = reader.GetString(2),
+                            Latitude = reader.GetDouble(3),
+                            Longitude = reader.GetDouble(4),
+                            Address = reader.IsDBNull(5) ? null : reader.GetString(5),
+                            IsAvailableTomorrow = reader.GetInt32(6) == 1
+                        });
+                    }
+                }
+            }
+
+            return passengers;
+        }
+
+        /// <summary>
         /// Gets a passenger by user ID
         /// </summary>
         public async Task<Passenger> GetPassengerByUserIdAsync(int userId)
@@ -649,6 +1039,7 @@ namespace claudpro.Services
                         return new Passenger
                         {
                             Id = reader.GetInt32(0),
+                            UserId = userId,
                             Name = reader.GetString(1),
                             Latitude = reader.GetDouble(2),
                             Longitude = reader.GetDouble(3),
@@ -660,6 +1051,158 @@ namespace claudpro.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Gets a passenger by its ID
+        /// </summary>
+        public async Task<Passenger> GetPassengerByIdAsync(int passengerId)
+        {
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    SELECT PassengerID, UserID, Name, Latitude, Longitude, Address, IsAvailableTomorrow
+                    FROM Passengers
+                    WHERE PassengerID = @PassengerID";
+                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        return new Passenger
+                        {
+                            Id = reader.GetInt32(0),
+                            UserId = reader.GetInt32(1),
+                            Name = reader.GetString(2),
+                            Latitude = reader.GetDouble(3),
+                            Longitude = reader.GetDouble(4),
+                            Address = reader.IsDBNull(5) ? null : reader.GetString(5),
+                            IsAvailableTomorrow = reader.GetInt32(6) == 1
+                        };
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Creates a new passenger for a user or updates an existing one
+        /// </summary>
+        public async Task<int> SavePassengerAsync(int userId, int passengerId, string name, double latitude, double longitude, string address = "")
+        {
+            if (passengerId > 0)
+            {
+                // Update existing passenger
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = @"
+                        UPDATE Passengers
+                        SET Name = @Name, Latitude = @Latitude, Longitude = @Longitude, Address = @Address
+                        WHERE PassengerID = @PassengerID";
+                    cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+                    cmd.Parameters.AddWithValue("@Name", name);
+                    cmd.Parameters.AddWithValue("@Latitude", latitude);
+                    cmd.Parameters.AddWithValue("@Longitude", longitude);
+                    cmd.Parameters.AddWithValue("@Address", address ?? "");
+
+                    await cmd.ExecuteNonQueryAsync();
+                    return passengerId;
+                }
+            }
+            else
+            {
+                // Create a new passenger
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = @"
+                        INSERT INTO Passengers (UserID, Name, Latitude, Longitude, Address, IsAvailableTomorrow)
+                        VALUES (@UserID, @Name, @Latitude, @Longitude, @Address, 1);
+                        SELECT last_insert_rowid();";
+                    cmd.Parameters.AddWithValue("@UserID", userId);
+                    cmd.Parameters.AddWithValue("@Name", name);
+                    cmd.Parameters.AddWithValue("@Latitude", latitude);
+                    cmd.Parameters.AddWithValue("@Longitude", longitude);
+                    cmd.Parameters.AddWithValue("@Address", address ?? "");
+
+                    object result = await cmd.ExecuteScalarAsync();
+                    if (result != null && int.TryParse(result.ToString(), out int newPassengerId))
+                    {
+                        return newPassengerId;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// Deletes a passenger from the database
+        /// </summary>
+        public async Task<bool> DeletePassengerAsync(int passengerId)
+        {
+            using (var transaction = connection.BeginTransaction())
+            {
+                try
+                {
+                    // Delete any route assignments for this passenger
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = "DELETE FROM PassengerAssignments WHERE PassengerID = @PassengerID";
+                        cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
+
+                    // Delete the passenger
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = "DELETE FROM Passengers WHERE PassengerID = @PassengerID";
+                        cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+                        int result = await cmd.ExecuteNonQueryAsync();
+
+                        if (result == 0)
+                        {
+                            transaction.Rollback();
+                            return false;
+                        }
+                    }
+
+                    transaction.Commit();
+                    return true;
+                }
+                catch (Exception)
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Searches for addresses that match the given query
+        /// </summary>
+        public async Task<List<(string Address, double Latitude, double Longitude)>> SearchAddressesAsync(string query, MapService mapService)
+        {
+            if (string.IsNullOrWhiteSpace(query) || mapService == null)
+                return new List<(string, double, double)>();
+
+            // Try to geocode the address
+            var result = await mapService.GeocodeAddressAsync(query);
+            if (!result.HasValue)
+                return new List<(string, double, double)>();
+
+            // Get the address from the coordinates
+            string address = await mapService.ReverseGeocodeAsync(result.Value.Latitude, result.Value.Longitude);
+
+            var results = new List<(string, double, double)>
+            {
+                (address, result.Value.Latitude, result.Value.Longitude)
+            };
+
+            return results;
         }
 
         #endregion
@@ -865,7 +1408,7 @@ namespace claudpro.Services
             }
 
             // Get all vehicles first
-            var vehicles = await GetAvailableVehiclesAsync();
+            var vehicles = await GetAllVehiclesAsync();
             var vehicleMap = vehicles.ToDictionary(v => v.Id);
 
             // Get passenger assignments
@@ -1096,7 +1639,6 @@ namespace claudpro.Services
                 }
             }
 
-
             DateTime? pickupDateTime = null;
             if (pickupTime != null)
             {
@@ -1159,51 +1701,46 @@ namespace claudpro.Services
             }
         }
 
-        #endregion
-
-        #region Helper Methods
-
         /// <summary>
-        /// Simple password hashing for demo purposes
-        /// In a real app, use a proper password hashing library
+        /// Gets all routes for a specific date
         /// </summary>
-        private string HashPassword(string password)
+        public async Task<List<(int RouteId, DateTime GeneratedTime, int VehicleCount, int PassengerCount)>> GetRouteHistoryAsync()
         {
-            // This is NOT secure - use proper password hashing in production
-            using (var sha = System.Security.Cryptography.SHA256.Create())
+            var result = new List<(int RouteId, DateTime GeneratedTime, int VehicleCount, int PassengerCount)>();
+
+            using (var cmd = new SQLiteCommand(connection))
             {
-                var bytes = System.Text.Encoding.UTF8.GetBytes(password);
-                var hash = sha.ComputeHash(bytes);
-                return Convert.ToBase64String(hash);
-            }
-        }
+                cmd.CommandText = @"
+                    SELECT r.RouteID, r.SolutionDate, r.GeneratedTime, 
+                           COUNT(DISTINCT rd.VehicleID) as VehicleCount,
+                           COUNT(pa.PassengerID) as PassengerCount
+                    FROM Routes r
+                    LEFT JOIN RouteDetails rd ON r.RouteID = rd.RouteID
+                    LEFT JOIN PassengerAssignments pa ON rd.RouteDetailID = pa.RouteDetailID
+                    GROUP BY r.RouteID
+                    ORDER BY r.SolutionDate DESC, r.GeneratedTime DESC
+                    LIMIT 50"; // Limit to recent routes
 
-        #endregion
-
-        #region IDisposable Implementation
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        protected virtual void Dispose(bool disposing)
-        {
-            if (!disposed)
-            {
-                if (disposing)
+                using (var reader = await cmd.ExecuteReaderAsync())
                 {
-                    connection?.Close();
-                    connection?.Dispose();
+                    while (await reader.ReadAsync())
+                    {
+                        result.Add((
+                            reader.GetInt32(0),
+                            DateTime.Parse(reader.GetString(2)),
+                            reader.GetInt32(3),
+                            reader.GetInt32(4)
+                        ));
+                    }
                 }
-
-                disposed = true;
             }
+
+            return result;
         }
 
         #endregion
 
+        #region Scheduling Methods
 
         /// <summary>
         /// Saves scheduling settings to the database
@@ -1214,11 +1751,11 @@ namespace claudpro.Services
             using (var cmd = new SQLiteCommand(connection))
             {
                 cmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS Settings (
-                SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
-                SettingName TEXT NOT NULL UNIQUE,
-                SettingValue TEXT NOT NULL
-            )";
+                    CREATE TABLE IF NOT EXISTS Settings (
+                        SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        SettingName TEXT NOT NULL UNIQUE,
+                        SettingValue TEXT NOT NULL
+                    )";
                 await cmd.ExecuteNonQueryAsync();
             }
 
@@ -1227,8 +1764,8 @@ namespace claudpro.Services
             {
                 // Save isEnabled setting
                 cmd.CommandText = @"
-            INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
-            VALUES (@SettingName, @SettingValue)";
+                    INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
+                    VALUES (@SettingName, @SettingValue)";
                 cmd.Parameters.AddWithValue("@SettingName", "SchedulingEnabled");
                 cmd.Parameters.AddWithValue("@SettingValue", isEnabled ? "1" : "0");
                 await cmd.ExecuteNonQueryAsync();
@@ -1236,8 +1773,8 @@ namespace claudpro.Services
                 // Save scheduledTime setting
                 cmd.Parameters.Clear();
                 cmd.CommandText = @"
-            INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
-            VALUES (@SettingName, @SettingValue)";
+                    INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
+                    VALUES (@SettingName, @SettingValue)";
                 cmd.Parameters.AddWithValue("@SettingName", "ScheduledTime");
                 cmd.Parameters.AddWithValue("@SettingValue", scheduledTime.ToString("HH:mm:ss"));
                 await cmd.ExecuteNonQueryAsync();
@@ -1282,6 +1819,117 @@ namespace claudpro.Services
             return (isEnabled, scheduledTime);
         }
 
+        /// <summary>
+        /// Gets the scheduling log entries
+        /// </summary>
+        public async Task<List<(DateTime RunTime, string Status, int RoutesGenerated, int PassengersAssigned)>> GetSchedulingLogAsync()
+        {
+            // First, check if the scheduling log table exists and create it if not
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS SchedulingLog (
+                        LogID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        RunTime TEXT NOT NULL,
+                        Status TEXT NOT NULL,
+                        RoutesGenerated INTEGER,
+                        PassengersAssigned INTEGER,
+                        ErrorMessage TEXT
+                    )";
+                await cmd.ExecuteNonQueryAsync();
+            }
 
+            // Now fetch the data
+            var result = new List<(DateTime RunTime, string Status, int RoutesGenerated, int PassengersAssigned)>();
+
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    SELECT RunTime, Status, RoutesGenerated, PassengersAssigned
+                    FROM SchedulingLog
+                    ORDER BY RunTime DESC
+                    LIMIT 50"; // Limit to recent entries
+
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        result.Add((
+                            DateTime.Parse(reader.GetString(0)),
+                            reader.GetString(1),
+                            reader.GetInt32(2),
+                            reader.GetInt32(3)
+                        ));
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Logs a scheduling run
+        /// </summary>
+        public async Task LogSchedulingRunAsync(DateTime runTime, string status, int routesGenerated, int passengersAssigned, string errorMessage = null)
+        {
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+                    INSERT INTO SchedulingLog (RunTime, Status, RoutesGenerated, PassengersAssigned, ErrorMessage)
+                    VALUES (@RunTime, @Status, @RoutesGenerated, @PassengersAssigned, @ErrorMessage)";
+                cmd.Parameters.AddWithValue("@RunTime", runTime.ToString("yyyy-MM-dd HH:mm:ss"));
+                cmd.Parameters.AddWithValue("@Status", status);
+                cmd.Parameters.AddWithValue("@RoutesGenerated", routesGenerated);
+                cmd.Parameters.AddWithValue("@PassengersAssigned", passengersAssigned);
+                cmd.Parameters.AddWithValue("@ErrorMessage", errorMessage ?? (object)DBNull.Value);
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        /// <summary>
+        /// Simple password hashing for demo purposes
+        /// In a real app, use a proper password hashing library
+        /// </summary>
+        private string HashPassword(string password)
+        {
+            // This is NOT secure - use proper password hashing in production
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(password);
+                var hash = sha.ComputeHash(bytes);
+                return Convert.ToBase64String(hash);
+            }
+        }
+
+        #endregion
+
+        #region IDisposable Implementation
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposed)
+            {
+                if (disposing)
+                {
+                    connection?.Close();
+                    connection?.Dispose();
+                }
+
+                disposed = true;
+            }
+        }
+
+        #endregion
     }
 }
