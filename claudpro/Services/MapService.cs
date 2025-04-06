@@ -501,6 +501,48 @@ namespace claudpro.Services
             }
         }
 
+        /// <summary>
+        /// Searches for address suggestions based on a partial address
+        /// </summary>
+        /// <param name="query">The partial address to search for</param>
+        /// <returns>A list of address suggestions</returns>
+        public async Task<List<string>> GetAddressSuggestionsAsync(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query)) return new List<string>();
+
+            try
+            {
+                string encodedQuery = Uri.EscapeDataString(query);
+                string url = $"https://maps.googleapis.com/maps/api/place/autocomplete/json?input={encodedQuery}&key={apiKey}";
+
+                var response = await httpClient.GetStringAsync(url);
+                dynamic data = JsonConvert.DeserializeObject(response);
+
+                if (data.status.ToString() != "OK")
+                {
+                    string errorMessage = data.status.ToString();
+                    if (data.error_message != null)
+                    {
+                        errorMessage += $": {data.error_message.ToString()}";
+                    }
+                    throw new Exception($"Autocomplete error: {errorMessage}");
+                }
+
+                var suggestions = new List<string>();
+                foreach (var prediction in data.predictions)
+                {
+                    suggestions.Add(prediction.description.ToString());
+                }
+
+                return suggestions;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error getting address suggestions: {ex.Message}");
+                return new List<string>();
+            }
+        }
+
         // IDisposable implementation
         public void Dispose()
         {

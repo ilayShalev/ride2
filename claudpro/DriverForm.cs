@@ -31,8 +31,7 @@ namespace claudpro
         // Fields for location setting functionality
         private bool isSettingLocation = false;
         private Label locationInstructionsLabel;
-        private TextBox addressTextBox;
-        private Button searchAddressButton;
+        private AddressSearchControl addressSearchControl;
         private Button setLocationButton;
 
         // Data models
@@ -135,11 +134,11 @@ namespace claudpro
             leftPanel.Controls.Add(refreshButton);
 
             logoutButton = ControlExtensions.CreateButton(
-                "Logout",
-                new Point(180, 530),
-                new Size(150, 30),
-                (s, e) => Close()
-            );
+                            "Logout",
+                            new Point(180, 530),
+                            new Size(150, 30),
+                            (s, e) => Close()
+                        );
             leftPanel.Controls.Add(logoutButton);
 
             // Map
@@ -154,6 +153,9 @@ namespace claudpro
             };
             Controls.Add(gMapControl);
             mapService.InitializeGoogleMaps(gMapControl);
+
+            // Enable the click event for map to set location
+            gMapControl.MouseClick += GMapControl_MouseClick;
         }
 
         private void AddLocationSettingControls()
@@ -184,26 +186,14 @@ namespace claudpro
             );
             leftPanel.Controls.Add(setLocationButton);
 
-            // Add a search box for address
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Or Search Address:",
-                new Point(20, 430),
-                new Size(150, 20)
-            ));
-
-            addressTextBox = ControlExtensions.CreateTextBox(
-                new Point(20, 455),
-                new Size(220, 25)
-            );
-            searchAddressButton = ControlExtensions.CreateButton(
-                "Search",
-                new Point(250, 455),
-                new Size(80, 25),
-                async (s, e) => await SearchAddressAsync(addressTextBox.Text)
-            );
-
-            leftPanel.Controls.Add(addressTextBox);
-            leftPanel.Controls.Add(searchAddressButton);
+            // Add address search control
+            addressSearchControl = new AddressSearchControl(mapService, gMapControl)
+            {
+                Location = new Point(20, 430),
+                Size = new Size(310, 50)
+            };
+            addressSearchControl.AddressFound += AddressSearchControl_AddressFound;
+            leftPanel.Controls.Add(addressSearchControl);
 
             // Add instructions label
             locationInstructionsLabel = ControlExtensions.CreateLabel(
@@ -216,6 +206,12 @@ namespace claudpro
             locationInstructionsLabel.ForeColor = Color.Red;
             locationInstructionsLabel.Visible = false;
             leftPanel.Controls.Add(locationInstructionsLabel);
+        }
+
+        private void AddressSearchControl_AddressFound(object sender, AddressFoundEventArgs e)
+        {
+            // When an address is found by the AddressSearchControl, update the vehicle location
+            UpdateVehicleLocation(e.Latitude, e.Longitude, e.FormattedAddress);
         }
 
         private async Task LoadDriverDataAsync()
@@ -253,6 +249,12 @@ namespace claudpro
 
                 // Update route details text
                 UpdateRouteDetailsText(routeData.PickupTime);
+
+                // Update the address search control with current address
+                if (!string.IsNullOrEmpty(vehicle.StartAddress))
+                {
+                    addressSearchControl.Address = vehicle.StartAddress;
+                }
             }
             catch (Exception ex)
             {
@@ -477,89 +479,51 @@ namespace claudpro
             // Change cursor to indicate map is clickable
             gMapControl.Cursor = Cursors.Hand;
 
-            // Add event handler for map clicks
-            gMapControl.MouseClick += MapClickToSetLocation;
-
             MessageBox.Show("Click on the map to set your starting location",
                 "Set Location", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         /// <summary>
-        /// Handles map click events when setting location
+        /// Handles map click events to set location
         /// </summary>
-        private void MapClickToSetLocation(object sender, MouseEventArgs e)
+        private void GMapControl_MouseClick(object sender, MouseEventArgs e)
         {
             if (!isSettingLocation) return;
 
             // Convert clicked point to geo coordinates
             PointLatLng point = gMapControl.FromLocalToLatLng(e.X, e.Y);
 
-            // Set vehicle location
-            UpdateVehicleLocation(point.Lat, point.Lng);
+            // Get address for the clicked location
+            Task.Run(async () =>
+            {
+                string address = await mapService.ReverseGeocodeAsync(point.Lat, point.Lng);
 
-            // Disable location setting mode
-            isSettingLocation = false;
-            locationInstructionsLabel.Visible = false;
-            gMapControl.Cursor = Cursors.Default;
-            gMapControl.MouseClick -= MapClickToSetLocation;
+                // Update vehicle location
+                this.Invoke(new Action(() =>
+                {
+                    UpdateVehicleLocation(point.Lat, point.Lng, address);
+                    isSettingLocation = false;
+                    locationInstructionsLabel.Visible = false;
+                    gMapControl.Cursor = Cursors.Default;
+                }));
+            });
         }
 
         /// <summary>
-        /// Searches for an address and updates the location if found
+        /// Updates the vehicle location in the database and UI
         /// </summary>
-        private async Task SearchAddressAsync(string address)
-        {
-            if (string.IsNullOrWhiteSpace(address)) return;
-
-            try
-            {
-                // Show searching indicator
-                Cursor = Cursors.WaitCursor;
-                addressTextBox.Enabled = false;
-                searchAddressButton.Enabled = false;
-
-                var result = await mapService.GeocodeAddressAsync(address);
-                if (result.HasValue)
-                {
-                    // Center map on found location
-                    gMapControl.Position = new PointLatLng(result.Value.Latitude, result.Value.Longitude);
-                    gMapControl.Zoom = 15;
-
-                    // Update vehicle location
-                    UpdateVehicleLocation(result.Value.Latitude, result.Value.Longitude);
-                }
-                else
-                {
-                    MessageBox.Show("Address not found. Please try again.", "Search Error",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error searching: {ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                // Reset cursor and enable address box
-                Cursor = Cursors.Default;
-                addressTextBox.Enabled = true;
-                searchAddressButton.Enabled = true;
-            }
-        }
-
-        /// <summary>
-        /// Updates the vehicle location in the database
-        /// </summary>
-        private async void UpdateVehicleLocation(double latitude, double longitude)
+        private async void UpdateVehicleLocation(double latitude, double longitude, string address = null)
         {
             try
             {
                 // Show waiting cursor
                 Cursor = Cursors.WaitCursor;
 
-                // Get address from coordinates (reverse geocoding)
-                string address = await mapService.ReverseGeocodeAsync(latitude, longitude);
+                // Attempt to get address if not provided
+                if (string.IsNullOrEmpty(address))
+                {
+                    address = await mapService.ReverseGeocodeAsync(latitude, longitude);
+                }
 
                 // Update vehicle in database
                 if (vehicle == null)
@@ -583,6 +547,9 @@ namespace claudpro
                     vehicle.StartLatitude = latitude;
                     vehicle.StartLongitude = longitude;
                     vehicle.StartAddress = address;
+
+                    // Update address in search control
+                    addressSearchControl.Address = address;
 
                     // Show confirmation and update marker on map
                     MessageBox.Show($"Your starting location has been set to:\n{address}",

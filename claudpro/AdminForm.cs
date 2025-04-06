@@ -40,6 +40,9 @@ namespace claudpro
         private string destinationAddress;
         private string destinationTargetTime;
 
+
+
+
         public AdminForm(DatabaseService dbService, MapService mapService)
         {
             this.dbService = dbService;
@@ -112,6 +115,7 @@ namespace claudpro
 
         private void SetupUsersTab()
         {
+
             // Users ListView
             usersListView = new ListView
             {
@@ -821,40 +825,46 @@ namespace claudpro
             panel.Controls.Add(saveButton);
 
             // Run now button
-            var runNowButton = ControlExtensions.CreateButton(
-                "Run Scheduler Now",
-                new Point(150, 100),
-                new Size(150, 30),
-                async (s, e) => {
-                    if (MessageBox.Show("Are you sure you want to run the scheduler now? This will calculate routes for tomorrow.",
-                            "Confirm Run", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            // First declare the button variable
+            var runNowButton = new Button();
+
+            // Initialize properties
+            runNowButton.Text = "Run Scheduler Now";
+            runNowButton.Location = new Point(150, 100);
+            runNowButton.Size = new Size(150, 30);
+
+            // Add to panel
+            panel.Controls.Add(runNowButton);
+
+            // AFTER adding to panel, attach the event handler
+            runNowButton.Click += async (s, e) => {
+                if (MessageBox.Show("Are you sure you want to run the scheduler now? This will calculate routes for tomorrow.",
+                        "Confirm Run", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                {
+                    try
                     {
-                        try
-                        {
-                            runNowButton.Enabled = false;
-                            runNowButton.Text = "Running...";
+                        runNowButton.Enabled = false;
+                        runNowButton.Text = "Running...";
 
-                            // This would trigger the same code that the Windows Service runs
-                            // For demonstration purposes, we're calling a placeholder
-                            await RunSchedulerAsync();
+                        // This would trigger the same code that the Windows Service runs
+                        // For demonstration purposes, we're calling a placeholder
+                        await RunSchedulerAsync();
 
-                            MessageBox.Show("Scheduler completed successfully.",
-                                "Scheduler Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        }
-                        catch (Exception ex)
-                        {
-                            MessageBox.Show($"Error running scheduler: {ex.Message}",
-                                "Scheduler Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                        finally
-                        {
-                            runNowButton.Enabled = true;
-                            runNowButton.Text = "Run Scheduler Now";
-                        }
+                        MessageBox.Show("Scheduler completed successfully.",
+                            "Scheduler Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error running scheduler: {ex.Message}",
+                            "Scheduler Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                    finally
+                    {
+                        runNowButton.Enabled = true;
+                        runNowButton.Text = "Run Scheduler Now";
                     }
                 }
-            );
-            panel.Controls.Add(runNowButton);
+            };
 
             // Scheduling history
             panel.Controls.Add(ControlExtensions.CreateLabel(
@@ -1257,6 +1267,7 @@ namespace claudpro
         private ComboBox userTypeComboBox;
         private Button saveButton;
         private Button cancelButton;
+
 
         public UserEditForm(DatabaseService dbService, int userId, string username, string userType, string name, string email, string phone)
         {
