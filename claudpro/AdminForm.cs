@@ -20,7 +20,7 @@ namespace claudpro
 
         private TabControl tabControl;
         private TabPage usersTab;
-        private TabPage vehiclesTab;
+        private TabPage vehiclesTab; // Changed from driversTab to match usage
         private TabPage passengersTab;
         private TabPage routesTab;
         private TabPage destinationTab;
@@ -32,6 +32,7 @@ namespace claudpro
         private List<Passenger> passengers;
         private Solution currentSolution;
         private ListView usersListView;
+        private ListView driversListView; // Added missing ListView
 
         // Destination information
         private double destinationLat;
@@ -88,7 +89,7 @@ namespace claudpro
 
             // Create tabs
             usersTab = new TabPage("Users");
-            vehiclesTab = new TabPage("Vehicles");
+            vehiclesTab = new TabPage("Vehicles"); // Changed from driversTab to match usage
             passengersTab = new TabPage("Passengers");
             routesTab = new TabPage("Routes");
             destinationTab = new TabPage("Destination");
@@ -258,8 +259,8 @@ namespace claudpro
 
         private void SetupVehiclesTab()
         {
-            // Vehicles ListView
-            var vehiclesListView = new ListView
+            // Initialize driversListView
+            driversListView = new ListView
             {
                 Location = new Point(10, 50),
                 Size = new Size(1140, 400),
@@ -267,34 +268,37 @@ namespace claudpro
                 FullRowSelect = true,
                 GridLines = true
             };
-            vehiclesListView.Columns.Add("ID", 50);
-            vehiclesListView.Columns.Add("Driver", 150);
-            vehiclesListView.Columns.Add("Capacity", 80);
-            vehiclesListView.Columns.Add("Start Location", 300);
-            vehiclesListView.Columns.Add("Available Tomorrow", 120);
-            vehiclesListView.Columns.Add("User ID", 80);
-            vehiclesTab.Controls.Add(vehiclesListView);
 
-            // Refresh button
+            // Change ListView column headers
+            driversListView.Columns.Add("ID", 50);
+            driversListView.Columns.Add("Driver Name", 150);
+            driversListView.Columns.Add("Vehicle Capacity", 80);
+            driversListView.Columns.Add("Start Location", 300);
+            driversListView.Columns.Add("Available Tomorrow", 120);
+            driversListView.Columns.Add("User ID", 80);
+
+            // Add the ListView to the tab
+            vehiclesTab.Controls.Add(driversListView);
+
+            // Change button text
             var refreshButton = ControlExtensions.CreateButton(
-                "Refresh Vehicles",
+                "Refresh Drivers",
                 new Point(10, 10),
                 new Size(120, 30),
                 async (s, e) => {
                     await LoadVehiclesAsync();
-                    await DisplayVehiclesAsync(vehiclesListView);
+                    await DisplayDriversAsync(driversListView);
                 }
             );
             vehiclesTab.Controls.Add(refreshButton);
 
-            // Add Vehicle button
-            var addVehicleButton = ControlExtensions.CreateButton(
-                "Add Vehicle",
+            var addDriverButton = ControlExtensions.CreateButton(
+                "Add Driver",
                 new Point(140, 10),
                 new Size(120, 30),
                 (s, e) => ShowVehicleEditForm(0)
             );
-            vehiclesTab.Controls.Add(addVehicleButton);
+            vehiclesTab.Controls.Add(addDriverButton);
 
             // Edit Vehicle button
             var editVehicleButton = ControlExtensions.CreateButton(
@@ -302,14 +306,14 @@ namespace claudpro
                 new Point(270, 10),
                 new Size(120, 30),
                 (s, e) => {
-                    if (vehiclesListView.SelectedItems.Count == 0)
+                    if (driversListView.SelectedItems.Count == 0)
                     {
                         MessageBox.Show("Please select a vehicle to edit.",
                             "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
 
-                    int vehicleId = int.Parse(vehiclesListView.SelectedItems[0].Text);
+                    int vehicleId = int.Parse(driversListView.SelectedItems[0].Text);
                     ShowVehicleEditForm(vehicleId);
                 }
             );
@@ -321,15 +325,15 @@ namespace claudpro
                 new Point(400, 10),
                 new Size(120, 30),
                 async (s, e) => {
-                    if (vehiclesListView.SelectedItems.Count == 0)
+                    if (driversListView.SelectedItems.Count == 0)
                     {
                         MessageBox.Show("Please select a vehicle to delete.",
                             "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
 
-                    int vehicleId = int.Parse(vehiclesListView.SelectedItems[0].Text);
-                    string driverName = vehiclesListView.SelectedItems[0].SubItems[1].Text;
+                    int vehicleId = int.Parse(driversListView.SelectedItems[0].Text);
+                    string driverName = driversListView.SelectedItems[0].SubItems[1].Text;
 
                     if (MessageBox.Show($"Are you sure you want to delete vehicle {vehicleId} assigned to {driverName}?",
                             "Confirm Deletion", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
@@ -345,7 +349,7 @@ namespace claudpro
                             }
 
                             await LoadVehiclesAsync();
-                            await DisplayVehiclesAsync(vehiclesListView);
+                            await DisplayDriversAsync(driversListView);
                             MessageBox.Show("Vehicle deleted successfully.",
                                 "Vehicle Deleted", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         }
@@ -377,7 +381,7 @@ namespace claudpro
                 if (tabControl.SelectedTab == vehiclesTab)
                 {
                     await LoadVehiclesAsync();
-                    await DisplayVehiclesAsync(vehiclesListView);
+                    await DisplayDriversAsync(driversListView);
                     DisplayVehiclesOnMap(gMapControl);
                 }
             };
@@ -741,20 +745,20 @@ namespace claudpro
 
             // Load destination info when tab is selected
             tabControl.SelectedIndexChanged += async (s, e) => {
-            if (tabControl.SelectedTab == destinationTab)
-            {
-                var dest = await dbService.GetDestinationAsync();
-                nameTextBox.Text = dest.Name;
-                timeTextBox.Text = dest.TargetTime;
-                latTextBox.Text = dest.Latitude.ToString();
-                lngTextBox.Text = dest.Longitude.ToString();
-                addressTextBox.Text = dest.Address;
+                if (tabControl.SelectedTab == destinationTab)
+                {
+                    var dest = await dbService.GetDestinationAsync();
+                    nameTextBox.Text = dest.Name;
+                    timeTextBox.Text = dest.TargetTime;
+                    latTextBox.Text = dest.Latitude.ToString();
+                    lngTextBox.Text = dest.Longitude.ToString();
+                    addressTextBox.Text = dest.Address;
 
-                // Show on map
-                gMapControl.Position = new GMap.NET.PointLatLng(dest.Latitude, dest.Longitude);
-                gMapControl.Zoom = 15;
+                    // Show on map
+                    gMapControl.Position = new GMap.NET.PointLatLng(dest.Latitude, dest.Longitude);
+                    gMapControl.Zoom = 15;
 
-                gMapControl.Overlays.Clear();
+                    gMapControl.Overlays.Clear();
                     var overlay = new GMap.NET.WindowsForms.GMapOverlay("destinationMarker");
                     var marker = new GMap.NET.WindowsForms.Markers.GMarkerGoogle(
                         new GMap.NET.PointLatLng(dest.Latitude, dest.Longitude),
@@ -989,7 +993,7 @@ namespace claudpro
             }
         }
 
-        private async Task DisplayVehiclesAsync(ListView listView)
+        private async Task DisplayDriversAsync(ListView listView)
         {
             listView.Items.Clear();
 
@@ -999,7 +1003,7 @@ namespace claudpro
             foreach (var vehicle in vehicles)
             {
                 var item = new ListViewItem(vehicle.Id.ToString());
-                item.SubItems.Add(vehicle.DriverName ?? $"Vehicle {vehicle.Id}");
+                item.SubItems.Add(vehicle.DriverName ?? $"User {vehicle.UserId}");
                 item.SubItems.Add(vehicle.Capacity.ToString());
 
                 string location = !string.IsNullOrEmpty(vehicle.StartAddress)
@@ -1121,7 +1125,6 @@ namespace claudpro
                 }
 
                 // Display routes on map
-                var routesTab = tabControl.TabPages["routesTab"];
                 var routesPanel = routesTab.Controls.OfType<Panel>().FirstOrDefault();
                 var gMapControl = routesPanel?.Controls.OfType<GMap.NET.WindowsForms.GMapControl>().FirstOrDefault();
                 var routesListView = routesPanel?.Controls.OfType<ListView>().FirstOrDefault();

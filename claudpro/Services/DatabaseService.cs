@@ -215,27 +215,59 @@ namespace claudpro.Services
         /// </summary>
         public async Task<int> AddUserAsync(string username, string password, string userType, string name, string email = "", string phone = "")
         {
-            using (var cmd = new SQLiteCommand(connection))
+            using (var transaction = connection.BeginTransaction())
             {
-                cmd.CommandText = @"
+                try
+                {
+                    int userId;
+                    using (var cmd = new SQLiteCommand(connection))
+                    {
+                        cmd.Transaction = transaction;
+                        cmd.CommandText = @"
                     INSERT INTO Users (Username, Password, UserType, Name, Email, Phone)
                     VALUES (@Username, @Password, @UserType, @Name, @Email, @Phone);
                     SELECT last_insert_rowid();";
-                cmd.Parameters.AddWithValue("@Username", username);
-                cmd.Parameters.AddWithValue("@Password", HashPassword(password));
-                cmd.Parameters.AddWithValue("@UserType", userType);
-                cmd.Parameters.AddWithValue("@Name", name);
-                cmd.Parameters.AddWithValue("@Email", email ?? "");
-                cmd.Parameters.AddWithValue("@Phone", phone ?? "");
+                        cmd.Parameters.AddWithValue("@Username", username);
+                        cmd.Parameters.AddWithValue("@Password", HashPassword(password));
+                        cmd.Parameters.AddWithValue("@UserType", userType);
+                        cmd.Parameters.AddWithValue("@Name", name);
+                        cmd.Parameters.AddWithValue("@Email", email ?? "");
+                        cmd.Parameters.AddWithValue("@Phone", phone ?? "");
 
-                object result = await cmd.ExecuteScalarAsync();
-                if (result != null && int.TryParse(result.ToString(), out int userId))
-                {
+                        object result = await cmd.ExecuteScalarAsync();
+                        if (result == null || !int.TryParse(result.ToString(), out userId))
+                        {
+                            transaction.Rollback();
+                            return -1;
+                        }
+                    }
+
+                    // If user is a driver, automatically create a vehicle for them
+                    if (userType.ToLower() == "driver" && userId > 0)
+                    {
+                        using (var vehicleCmd = new SQLiteCommand(connection))
+                        {
+                            vehicleCmd.Transaction = transaction;
+                            vehicleCmd.CommandText = @"
+                        INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, IsAvailableTomorrow)
+                        VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, 1)";
+                            vehicleCmd.Parameters.AddWithValue("@UserID", userId);
+                            vehicleCmd.Parameters.AddWithValue("@Capacity", 4); // Default capacity
+                            vehicleCmd.Parameters.AddWithValue("@StartLatitude", 0);
+                            vehicleCmd.Parameters.AddWithValue("@StartLongitude", 0);
+                            await vehicleCmd.ExecuteNonQueryAsync();
+                        }
+                    }
+
+                    transaction.Commit();
                     return userId;
                 }
+                catch (Exception)
+                {
+                    transaction.Rollback();
+                    throw;
+                }
             }
-
-            return -1;
         }
 
         /// <summary>
@@ -937,63 +969,7 @@ namespace claudpro.Services
             return -1;
         }
 
-        /// <summary>
-        /// Updates a vehicle's location information
-        /// </summary>
-        public async Task<bool> UpdateVehicleLocationAsync(int userId, double latitude, double longitude, string address = "")
-        {
-            var vehicle = await GetVehicleByUserIdAsync(userId);
 
-            if (vehicle == null)
-            {
-                // If the vehicle doesn't exist yet, create it with default capacity
-                await SaveDriverVehicleAsync(userId, 4, latitude, longitude, address);
-                return true;
-            }
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-            UPDATE Vehicles
-            SET StartLatitude = @Latitude, StartLongitude = @Longitude, StartAddress = @Address
-            WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Latitude", latitude);
-                cmd.Parameters.AddWithValue("@Longitude", longitude);
-                cmd.Parameters.AddWithValue("@Address", address ?? "");
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        /// <summary>
-        /// Updates a vehicle's capacity (number of seats)
-        /// </summary>
-        public async Task<bool> UpdateVehicleCapacityAsync(int userId, int capacity)
-        {
-            var vehicle = await GetVehicleByUserIdAsync(userId);
-
-            if (vehicle == null)
-            {
-                // If the vehicle doesn't exist yet, create it with default location
-                await SaveDriverVehicleAsync(userId, capacity, 0, 0, "");
-                return true;
-            }
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-            UPDATE Vehicles
-            SET Capacity = @Capacity
-            WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Capacity", capacity);
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
 
         #endregion
 
@@ -1954,98 +1930,6 @@ namespace claudpro.Services
             return (vehicle, pickupDateTime);
         }
 
-        // Method for driver route details
-        public async Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)> GetDriverRouteAsync(int userId, string date)
-        {
-            // Get driver's vehicle first
-            var vehicle = await GetVehicleByUserIdAsync(userId);
-            if (vehicle == null)
-            {
-                return (null, null, null);
-            }
-
-            // Get route for this date
-            int routeId;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
-                cmd.Parameters.AddWithValue("@SolutionDate", date);
-
-                object result = await cmd.ExecuteScalarAsync();
-                if (result == null || !int.TryParse(result.ToString(), out routeId))
-                {
-                    return (vehicle, new List<Passenger>(), null);
-                }
-            }
-
-            // Get route details for this vehicle
-            int routeDetailId;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-            SELECT RouteDetailID, TotalDistance, TotalTime 
-            FROM RouteDetails 
-            WHERE RouteID = @RouteID AND VehicleID = @VehicleID";
-                cmd.Parameters.AddWithValue("@RouteID", routeId);
-                cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        routeDetailId = reader.GetInt32(0);
-                        vehicle.TotalDistance = reader.GetDouble(1);
-                        vehicle.TotalTime = reader.GetDouble(2);
-                    }
-                    else
-                    {
-                        return (vehicle, new List<Passenger>(), null);
-                    }
-                }
-            }
-
-            // Get assigned passengers and pickup times
-            var passengers = new List<Passenger>();
-            DateTime? firstPickupTime = null;
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-            SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
-                   p.Name, p.Latitude, p.Longitude, p.Address
-            FROM PassengerAssignments pa
-            JOIN Passengers p ON pa.PassengerID = p.PassengerID
-            WHERE pa.RouteDetailID = @RouteDetailID
-            ORDER BY pa.StopOrder";
-                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        var passenger = new Passenger
-                        {
-                            Id = reader.GetInt32(0),
-                            Name = reader.GetString(3),
-                            Latitude = reader.GetDouble(4),
-                            Longitude = reader.GetDouble(5),
-                            Address = reader.IsDBNull(6) ? null : reader.GetString(6),
-                            EstimatedPickupTime = reader.IsDBNull(2) ? null : reader.GetString(2)
-                        };
-
-                        passengers.Add(passenger);
-
-                        if (passengers.Count == 1 && !reader.IsDBNull(2))
-                        {
-                            firstPickupTime = DateTime.Parse(reader.GetString(2));
-                        }
-                    }
-                }
-            }
-
-            vehicle.AssignedPassengers = passengers;
-            return (vehicle, passengers, firstPickupTime);
-        }
 
         // Method for scheduling settings
         public async Task<(bool IsEnabled, DateTime ScheduledTime)> GetSchedulingSettingsAsync()
