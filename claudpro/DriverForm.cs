@@ -36,186 +36,240 @@ namespace claudpro
 
         // Data models
         private Vehicle vehicle;
-        private List<Passenger> assignedPassengers;
+        private List<Passenger> assignedPassengers = new List<Passenger>();
         private DateTime? pickupTime;
 
         public DriverForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
-            this.dbService = dbService;
-            this.mapService = mapService;
+            this.dbService = dbService ?? throw new ArgumentNullException(nameof(dbService));
+            this.mapService = mapService ?? throw new ArgumentNullException(nameof(mapService));
             this.userId = userId;
-            this.username = username;
+            this.username = username ?? throw new ArgumentNullException(nameof(username));
 
             // Use the designer-generated InitializeComponent
             InitializeComponent();
+        }
 
-            // Setup UI manually
-            SetupUI();
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            try
+            {
+                // Setup UI manually
+                SetupUI();
 
-            this.Load += async (s, e) => await LoadDriverDataAsync();
+                // Initialize map with default position
+                if (gMapControl != null)
+                {
+                    mapService.InitializeGoogleMaps(gMapControl, 32.0741, 34.7922);
+                }
+
+                // Load data asynchronously
+                LoadDriverDataAsync().ContinueWith(t =>
+                {
+                    if (t.IsFaulted && t.Exception != null)
+                    {
+                        this.Invoke(new Action(() =>
+                        {
+                            MessageBox.Show($"Error loading driver data: {t.Exception.InnerException?.Message ?? t.Exception.Message}",
+                                "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }));
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error initializing driver form: {ex.Message}",
+                    "Initialization Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void SetupUI()
         {
-            // Set form properties - this can be moved to the designer
-            this.Text = "RideMatch - Driver Interface";
-            this.Size = new Size(1000, 700);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterScreen;
-
-            // Title
-            var titleLabel = ControlExtensions.CreateLabel(
-                $"Welcome, {username}",
-                new Point(20, 20),
-                new Size(960, 30),
-                new Font("Arial", 16, FontStyle.Bold),
-                ContentAlignment.MiddleCenter
-            );
-            Controls.Add(titleLabel);
-
-            // Left panel for controls and details
-            leftPanel = ControlExtensions.CreatePanel(
-                new Point(20, 70),
-                new Size(350, 580),
-                BorderStyle.FixedSingle
-            );
-            Controls.Add(leftPanel);
-
-            // Availability controls
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Tomorrow's Status:",
-                new Point(20, 20),
-                new Size(150, 20),
-                new Font("Arial", 10, FontStyle.Bold)
-            ));
-
-            availabilityCheckBox = ControlExtensions.CreateCheckBox(
-                "I am available to drive tomorrow",
-                new Point(20, 50),
-                new Size(300, 30),
-                true
-            );
-            availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
-            leftPanel.Controls.Add(availabilityCheckBox);
-
-            var statusPanel = ControlExtensions.CreatePanel(
-                new Point(20, 90),
-                new Size(310, 2),
-                BorderStyle.FixedSingle
-            );
-            statusPanel.BackColor = Color.Gray;
-            leftPanel.Controls.Add(statusPanel);
-
-            // Route details section
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Your Route Details:",
-                new Point(20, 110),
-                new Size(200, 20),
-                new Font("Arial", 10, FontStyle.Bold)
-            ));
-
-            routeDetailsTextBox = ControlExtensions.CreateRichTextBox(
-                new Point(20, 140),
-                new Size(310, 200),
-                true
-            );
-            leftPanel.Controls.Add(routeDetailsTextBox);
-
-            // Add location setting functionality
-            AddLocationSettingControls();
-
-            // Buttons
-            refreshButton = ControlExtensions.CreateButton(
-                "Refresh",
-                new Point(20, 530),
-                new Size(150, 30),
-                async (s, e) => await LoadDriverDataAsync()
-            );
-            leftPanel.Controls.Add(refreshButton);
-
-            logoutButton = ControlExtensions.CreateButton(
-                            "Logout",
-                            new Point(180, 530),
-                            new Size(150, 30),
-                            (s, e) => Close()
-                        );
-            leftPanel.Controls.Add(logoutButton);
-
-            // Map
-            gMapControl = new GMapControl
+            try
             {
-                Location = new Point(390, 70),
-                Size = new Size(580, 580),
-                MinZoom = 2,
-                MaxZoom = 18,
-                Zoom = 13,
-                DragButton = MouseButtons.Left
-            };
-            Controls.Add(gMapControl);
-            mapService.InitializeGoogleMaps(gMapControl);
+                // Set form properties - this can be moved to the designer
+                this.Text = "RideMatch - Driver Interface";
+                this.Size = new Size(1000, 700);
+                this.FormBorderStyle = FormBorderStyle.FixedDialog;
+                this.StartPosition = FormStartPosition.CenterScreen;
 
-            // Enable the click event for map to set location
-            gMapControl.MouseClick += GMapControl_MouseClick;
+                // Title
+                var titleLabel = ControlExtensions.CreateLabel(
+                    $"Welcome, {username}",
+                    new Point(20, 20),
+                    new Size(960, 30),
+                    new Font("Arial", 16, FontStyle.Bold),
+                    ContentAlignment.MiddleCenter
+                );
+                Controls.Add(titleLabel);
+
+                // Left panel for controls and details
+                leftPanel = ControlExtensions.CreatePanel(
+                    new Point(20, 70),
+                    new Size(350, 580),
+                    BorderStyle.FixedSingle
+                );
+                Controls.Add(leftPanel);
+
+                // Availability controls
+                leftPanel.Controls.Add(ControlExtensions.CreateLabel(
+                    "Tomorrow's Status:",
+                    new Point(20, 20),
+                    new Size(150, 20),
+                    new Font("Arial", 10, FontStyle.Bold)
+                ));
+
+                availabilityCheckBox = ControlExtensions.CreateCheckBox(
+                    "I am available to drive tomorrow",
+                    new Point(20, 50),
+                    new Size(300, 30),
+                    true
+                );
+                availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
+                leftPanel.Controls.Add(availabilityCheckBox);
+
+                var statusPanel = ControlExtensions.CreatePanel(
+                    new Point(20, 90),
+                    new Size(310, 2),
+                    BorderStyle.FixedSingle
+                );
+                statusPanel.BackColor = Color.Gray;
+                leftPanel.Controls.Add(statusPanel);
+
+                // Route details section
+                leftPanel.Controls.Add(ControlExtensions.CreateLabel(
+                    "Your Route Details:",
+                    new Point(20, 110),
+                    new Size(200, 20),
+                    new Font("Arial", 10, FontStyle.Bold)
+                ));
+
+                routeDetailsTextBox = ControlExtensions.CreateRichTextBox(
+                    new Point(20, 140),
+                    new Size(310, 200),
+                    true
+                );
+                leftPanel.Controls.Add(routeDetailsTextBox);
+
+                // Add location setting functionality
+                AddLocationSettingControls();
+
+                // Buttons
+                refreshButton = ControlExtensions.CreateButton(
+                    "Refresh",
+                    new Point(20, 530),
+                    new Size(150, 30),
+                    async (s, e) => await LoadDriverDataAsync()
+                );
+                leftPanel.Controls.Add(refreshButton);
+
+                logoutButton = ControlExtensions.CreateButton(
+                    "Logout",
+                    new Point(180, 530),
+                    new Size(150, 30),
+                    (s, e) => Close()
+                );
+                leftPanel.Controls.Add(logoutButton);
+
+                // Map
+                gMapControl = new GMapControl
+                {
+                    Location = new Point(390, 70),
+                    Size = new Size(580, 580),
+                    MinZoom = 2,
+                    MaxZoom = 18,
+                    Zoom = 13,
+                    DragButton = MouseButtons.Left
+                };
+                Controls.Add(gMapControl);
+
+                // Initialize message
+                routeDetailsTextBox.AppendText("Loading driver data...\n");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error setting up UI: {ex.Message}",
+                    "UI Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void AddLocationSettingControls()
         {
-            // Add a separator panel
-            var locationPanel = ControlExtensions.CreatePanel(
-                new Point(20, 350),
-                new Size(310, 2),
-                BorderStyle.FixedSingle
-            );
-            locationPanel.BackColor = Color.Gray;
-            leftPanel.Controls.Add(locationPanel);
-
-            // Add location setting section title
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Set Your Starting Location:",
-                new Point(20, 360),
-                new Size(200, 20),
-                new Font("Arial", 10, FontStyle.Bold)
-            ));
-
-            // Add a button for setting location
-            setLocationButton = ControlExtensions.CreateButton(
-                "Set Location on Map",
-                new Point(20, 390),
-                new Size(150, 30),
-                (s, e) => EnableMapLocationSelection()
-            );
-            leftPanel.Controls.Add(setLocationButton);
-
-            // Add address search control
-            addressSearchControl = new AddressSearchControl(mapService, gMapControl)
+            try
             {
-                Location = new Point(20, 430),
-                Size = new Size(310, 50)
-            };
-            addressSearchControl.AddressFound += AddressSearchControl_AddressFound;
-            leftPanel.Controls.Add(addressSearchControl);
+                // Add a separator panel
+                var locationPanel = ControlExtensions.CreatePanel(
+                    new Point(20, 350),
+                    new Size(310, 2),
+                    BorderStyle.FixedSingle
+                );
+                locationPanel.BackColor = Color.Gray;
+                leftPanel.Controls.Add(locationPanel);
 
-            // Add instructions label
-            locationInstructionsLabel = ControlExtensions.CreateLabel(
-                "Click on the map to set your starting location",
-                new Point(20, 490),
-                new Size(310, 20),
-                null,
-                ContentAlignment.MiddleCenter
-            );
-            locationInstructionsLabel.ForeColor = Color.Red;
-            locationInstructionsLabel.Visible = false;
-            leftPanel.Controls.Add(locationInstructionsLabel);
+                // Add location setting section title
+                leftPanel.Controls.Add(ControlExtensions.CreateLabel(
+                    "Set Your Starting Location:",
+                    new Point(20, 360),
+                    new Size(200, 20),
+                    new Font("Arial", 10, FontStyle.Bold)
+                ));
+
+                // Add a button for setting location
+                setLocationButton = ControlExtensions.CreateButton(
+                    "Set Location on Map",
+                    new Point(20, 390),
+                    new Size(150, 30),
+                    (s, e) => EnableMapLocationSelection()
+                );
+                leftPanel.Controls.Add(setLocationButton);
+
+                // Add address search control
+                addressSearchControl = new AddressSearchControl(mapService, gMapControl)
+                {
+                    Location = new Point(20, 430),
+                    Size = new Size(310, 50)
+                };
+                addressSearchControl.AddressFound += AddressSearchControl_AddressFound;
+                leftPanel.Controls.Add(addressSearchControl);
+
+                // Add instructions label
+                locationInstructionsLabel = ControlExtensions.CreateLabel(
+                    "Click on the map to set your starting location",
+                    new Point(20, 490),
+                    new Size(310, 20),
+                    null,
+                    ContentAlignment.MiddleCenter
+                );
+                locationInstructionsLabel.ForeColor = Color.Red;
+                locationInstructionsLabel.Visible = false;
+                leftPanel.Controls.Add(locationInstructionsLabel);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error setting up location controls: {ex.Message}",
+                    "UI Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void AddressSearchControl_AddressFound(object sender, AddressFoundEventArgs e)
         {
-            // When an address is found by the AddressSearchControl, update the vehicle location
-            UpdateVehicleLocation(e.Latitude, e.Longitude, e.FormattedAddress);
+            try
+            {
+                // When an address is found by the AddressSearchControl, update the vehicle location
+                UpdateVehicleLocation(e.Latitude, e.Longitude, e.FormattedAddress);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error processing address: {ex.Message}",
+                    "Address Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private async Task LoadDriverDataAsync()
         {
+            if (refreshButton == null || routeDetailsTextBox == null) return;
+
             refreshButton.Enabled = false;
             routeDetailsTextBox.Clear();
             routeDetailsTextBox.AppendText("Loading route data...\n");
@@ -241,8 +295,9 @@ namespace claudpro
 
                 // Get route data
                 var routeData = await dbService.GetDriverRouteAsync(userId, today);
-                vehicle = routeData.Vehicle;
-                assignedPassengers = routeData.Passengers;
+                vehicle = routeData.Vehicle ?? vehicle;
+                assignedPassengers = routeData.Passengers ?? new List<Passenger>();
+                pickupTime = routeData.PickupTime;
 
                 // Clear map and display the route
                 ShowRouteOnMap();
@@ -251,7 +306,7 @@ namespace claudpro
                 UpdateRouteDetailsText(routeData.PickupTime);
 
                 // Update the address search control with current address
-                if (!string.IsNullOrEmpty(vehicle.StartAddress))
+                if (addressSearchControl != null && !string.IsNullOrEmpty(vehicle.StartAddress))
                 {
                     addressSearchControl.Address = vehicle.StartAddress;
                 }
@@ -269,20 +324,43 @@ namespace claudpro
 
         private void ShowRouteOnMap()
         {
-            if (gMapControl == null) return;
+            if (gMapControl == null || vehicle == null) return;
 
             try
             {
                 gMapControl.Overlays.Clear();
 
-                if (vehicle == null)
-                    return;
-
-                // Create overlays
                 var vehiclesOverlay = new GMapOverlay("vehicles");
                 var passengersOverlay = new GMapOverlay("passengers");
                 var routesOverlay = new GMapOverlay("routes");
                 var destinationOverlay = new GMapOverlay("destination");
+
+                // Show vehicle marker
+                var vehicleMarker = MapOverlays.CreateVehicleMarker(vehicle);
+                vehiclesOverlay.Markers.Add(vehicleMarker);
+
+                // Center map on vehicle location
+                gMapControl.Position = new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude);
+                gMapControl.Zoom = 13;
+
+                // Show passenger markers and create route points
+                if (assignedPassengers != null && assignedPassengers.Count > 0)
+                {
+                    foreach (var passenger in assignedPassengers)
+                    {
+                        if (passenger != null)
+                        {
+                            var passengerMarker = MapOverlays.CreatePassengerMarker(passenger);
+                            passengersOverlay.Markers.Add(passengerMarker);
+                        }
+                    }
+                }
+
+                // Add overlays to map
+                gMapControl.Overlays.Add(routesOverlay);
+                gMapControl.Overlays.Add(vehiclesOverlay);
+                gMapControl.Overlays.Add(passengersOverlay);
+                gMapControl.Overlays.Add(destinationOverlay);
 
                 // Get destination from database
                 Task.Run(async () => {
@@ -290,83 +368,63 @@ namespace claudpro
                     {
                         var destination = await dbService.GetDestinationAsync();
 
-                        // Add destination marker
                         this.Invoke(new Action(() => {
                             try
                             {
-                                var destinationMarker = MapOverlays.CreateDestinationMarker(destination.Latitude, destination.Longitude);
-                                destinationOverlay.Markers.Add(destinationMarker);
+                                // Add destination marker
+                                var destMarker = MapOverlays.CreateDestinationMarker(
+                                    destination.Latitude, destination.Longitude);
 
-                                // Show vehicle marker
-                                var vehicleMarker = MapOverlays.CreateVehicleMarker(vehicle);
-                                vehiclesOverlay.Markers.Add(vehicleMarker);
+                                // Create a new overlay since we're on a different thread
+                                var newDestOverlay = new GMapOverlay("destination");
+                                newDestOverlay.Markers.Add(destMarker);
+                                gMapControl.Overlays.Add(newDestOverlay);
 
-                                // Show passenger markers
-                                if (assignedPassengers != null)
-                                {
-                                    foreach (var passenger in assignedPassengers)
-                                    {
-                                        if (passenger != null)
-                                        {
-                                            var passengerMarker = MapOverlays.CreatePassengerMarker(passenger);
-                                            passengersOverlay.Markers.Add(passengerMarker);
-                                        }
-                                    }
-                                }
-
-                                // Show route
+                                // Create route if we have passengers
                                 if (assignedPassengers != null && assignedPassengers.Count > 0)
                                 {
-                                    var points = new List<PointLatLng>();
-                                    points.Add(new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude));
+                                    var routePoints = new List<PointLatLng>();
+                                    routePoints.Add(new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude));
 
                                     foreach (var passenger in assignedPassengers)
                                     {
-                                        if (passenger != null)
-                                        {
-                                            points.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
-                                        }
+                                        routePoints.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
                                     }
 
-                                    points.Add(new PointLatLng(destination.Latitude, destination.Longitude));
+                                    routePoints.Add(new PointLatLng(destination.Latitude, destination.Longitude));
 
-                                    var routeColor = Color.Blue;
-                                    var route = MapOverlays.CreateRoute(points, "Route", routeColor);
-                                    routesOverlay.Routes.Add(route);
+                                    // Create route
+                                    var newRoute = MapOverlays.CreateRoute(routePoints, "DriverRoute", Color.Blue);
+                                    var newRouteOverlay = new GMapOverlay("route");
+                                    newRouteOverlay.Routes.Add(newRoute);
+                                    gMapControl.Overlays.Add(newRouteOverlay);
                                 }
 
-                                // Add overlays to map in the correct order
-                                gMapControl.Overlays.Add(routesOverlay);
-                                gMapControl.Overlays.Add(vehiclesOverlay);
-                                gMapControl.Overlays.Add(passengersOverlay);
-                                gMapControl.Overlays.Add(destinationOverlay);
-
-                                // Center map on vehicle location
-                                gMapControl.Position = new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude);
-                                gMapControl.Zoom = 13;
+                                gMapControl.Refresh();
                             }
                             catch (Exception ex)
                             {
-                                MessageBox.Show($"Error displaying route: {ex.Message}", "Map Display Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                Console.WriteLine($"Error adding destination marker: {ex.Message}");
                             }
                         }));
                     }
                     catch (Exception ex)
                     {
-                        this.Invoke(new Action(() => {
-                            MessageBox.Show($"Error loading destination: {ex.Message}", "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        }));
+                        Console.WriteLine($"Error getting destination: {ex.Message}");
                     }
                 });
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error preparing map display: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Error displaying route: {ex.Message}",
+                    "Map Display Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
         private void UpdateRouteDetailsText(DateTime? departureTime)
         {
+            if (routeDetailsTextBox == null) return;
+
             routeDetailsTextBox.Clear();
 
             if (vehicle == null)
@@ -399,6 +457,8 @@ namespace claudpro
                 for (int i = 0; i < assignedPassengers.Count; i++)
                 {
                     var passenger = assignedPassengers[i];
+                    if (passenger == null) continue;
+
                     routeDetailsTextBox.AppendText($"{i + 1}. {passenger.Name}\n");
 
                     if (!string.IsNullOrEmpty(passenger.Address))
@@ -423,7 +483,7 @@ namespace claudpro
 
         private async Task UpdateAvailabilityAsync()
         {
-            if (vehicle == null)
+            if (vehicle == null || availabilityCheckBox == null)
                 return;
 
             try
@@ -473,14 +533,26 @@ namespace claudpro
         /// </summary>
         private void EnableMapLocationSelection()
         {
-            isSettingLocation = true;
-            locationInstructionsLabel.Visible = true;
+            try
+            {
+                isSettingLocation = true;
+                locationInstructionsLabel.Visible = true;
 
-            // Change cursor to indicate map is clickable
-            gMapControl.Cursor = Cursors.Hand;
+                // Change cursor to indicate map is clickable
+                gMapControl.Cursor = Cursors.Hand;
 
-            MessageBox.Show("Click on the map to set your starting location",
-                "Set Location", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // Add event handler for map clicks
+                gMapControl.MouseClick += GMapControl_MouseClick;
+
+                MessageBox.Show("Click on the map to set your starting location",
+                    "Set Location", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error enabling location selection: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                isSettingLocation = false;
+            }
         }
 
         /// <summary>
@@ -490,23 +562,57 @@ namespace claudpro
         {
             if (!isSettingLocation) return;
 
-            // Convert clicked point to geo coordinates
-            PointLatLng point = gMapControl.FromLocalToLatLng(e.X, e.Y);
-
-            // Get address for the clicked location
-            Task.Run(async () =>
+            try
             {
-                string address = await mapService.ReverseGeocodeAsync(point.Lat, point.Lng);
+                // Convert clicked point to geo coordinates
+                PointLatLng point = gMapControl.FromLocalToLatLng(e.X, e.Y);
 
-                // Update vehicle location
-                this.Invoke(new Action(() =>
+                // Get address for the clicked location
+                Task.Run(async () =>
                 {
-                    UpdateVehicleLocation(point.Lat, point.Lng, address);
-                    isSettingLocation = false;
-                    locationInstructionsLabel.Visible = false;
-                    gMapControl.Cursor = Cursors.Default;
-                }));
-            });
+                    try
+                    {
+                        string address = await mapService.ReverseGeocodeAsync(point.Lat, point.Lng);
+
+                        // Update vehicle location
+                        this.Invoke(new Action(() =>
+                        {
+                            UpdateVehicleLocation(point.Lat, point.Lng, address);
+                            isSettingLocation = false;
+                            locationInstructionsLabel.Visible = false;
+                            gMapControl.Cursor = Cursors.Default;
+
+                            // Remove the click handler
+                            gMapControl.MouseClick -= GMapControl_MouseClick;
+                        }));
+                    }
+                    catch (Exception ex)
+                    {
+                        this.Invoke(new Action(() =>
+                        {
+                            MessageBox.Show($"Error getting address: {ex.Message}",
+                                "Geocoding Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            isSettingLocation = false;
+                            locationInstructionsLabel.Visible = false;
+                            gMapControl.Cursor = Cursors.Default;
+
+                            // Remove the click handler
+                            gMapControl.MouseClick -= GMapControl_MouseClick;
+                        }));
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error processing map click: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                isSettingLocation = false;
+                locationInstructionsLabel.Visible = false;
+                gMapControl.Cursor = Cursors.Default;
+
+                // Remove the click handler
+                gMapControl.MouseClick -= GMapControl_MouseClick;
+            }
         }
 
         /// <summary>
@@ -549,7 +655,8 @@ namespace claudpro
                     vehicle.StartAddress = address;
 
                     // Update address in search control
-                    addressSearchControl.Address = address;
+                    if (addressSearchControl != null)
+                        addressSearchControl.Address = address;
 
                     // Show confirmation and update marker on map
                     MessageBox.Show($"Your starting location has been set to:\n{address}",
@@ -577,11 +684,6 @@ namespace claudpro
                 // Reset cursor
                 Cursor = Cursors.Default;
             }
-        }
-
-        private void DriverForm_Load(object sender, EventArgs e)
-        {
-            // Initialization code for DriverForm
         }
     }
 }

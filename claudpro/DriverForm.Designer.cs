@@ -34,11 +34,11 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 450);
+            this.ClientSize = new System.Drawing.Size(1000, 700);
             this.Name = "DriverForm";
-            this.Text = "DriverForm";
-            this.Load += new System.EventHandler(this.DriverForm_Load);
+            this.Text = "RideMatch - Driver Interface";
             this.ResumeLayout(false);
+
         }
 
         #endregion
