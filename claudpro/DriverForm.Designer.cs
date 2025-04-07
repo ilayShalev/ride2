@@ -37,6 +37,7 @@
             this.ClientSize = new System.Drawing.Size(1000, 700);
             this.Name = "DriverForm";
             this.Text = "RideMatch - Driver Interface";
+            this.Load += new System.EventHandler(this.DriverForm_Load);
             this.ResumeLayout(false);
 
         }

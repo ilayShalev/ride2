@@ -251,8 +251,8 @@ namespace claudpro
                     new Font("Arial", 10, FontStyle.Bold)
                 ));
 
-                // Add a button for setting location
-                setLocationButton = ControlExtensions.CreateButton(
+                // Add the "Set Location on Map" button
+                var setLocationButton = ControlExtensions.CreateButton(
                     "Set Location on Map",
                     new Point(20, 450),
                     new Size(150, 30),
@@ -260,19 +260,33 @@ namespace claudpro
                 );
                 leftPanel.Controls.Add(setLocationButton);
 
-                // Add address search control
-                addressSearchControl = new AddressSearchControl(mapService, gMapControl)
-                {
-                    Location = new Point(20, 490),
-                    Size = new Size(310, 30)
-                };
-                addressSearchControl.AddressFound += AddressSearchControl_AddressFound;
-                leftPanel.Controls.Add(addressSearchControl);
+                // Add the "Or Search Address:" label
+                leftPanel.Controls.Add(ControlExtensions.CreateLabel(
+                    "Or Search Address:",
+                    new Point(20, 490),
+                    new Size(150, 20)
+                ));
 
-                // Add instructions label
+                // Add address textbox
+                var addressTextBox = ControlExtensions.CreateTextBox(
+                    new Point(20, 515),
+                    new Size(220, 25)
+                );
+                leftPanel.Controls.Add(addressTextBox);
+
+                // Add search button
+                var searchButton = ControlExtensions.CreateButton(
+                    "Search",
+                    new Point(250, 515),
+                    new Size(80, 25),
+                    async (s, e) => await SearchAddressAsync(addressTextBox.Text)
+                );
+                leftPanel.Controls.Add(searchButton);
+
+                // Add instructions label (hidden initially)
                 locationInstructionsLabel = ControlExtensions.CreateLabel(
                     "Click on the map to set your starting location",
-                    new Point(20, 450),
+                    new Point(20, 550),
                     new Size(310, 20),
                     null,
                     ContentAlignment.MiddleCenter
@@ -288,6 +302,43 @@ namespace claudpro
             }
         }
 
+        // Add this method to handle address search
+        private async Task SearchAddressAsync(string address)
+        {
+            if (string.IsNullOrWhiteSpace(address)) return;
+
+            try
+            {
+                // Show searching indicator
+                Cursor = Cursors.WaitCursor;
+
+                var result = await mapService.GeocodeAddressAsync(address);
+                if (result.HasValue)
+                {
+                    // Center map on found location
+                    gMapControl.Position = new PointLatLng(result.Value.Latitude, result.Value.Longitude);
+                    gMapControl.Zoom = 15;
+
+                    // Update vehicle location
+                    UpdateVehicleLocation(result.Value.Latitude, result.Value.Longitude);
+                }
+                else
+                {
+                    MessageBox.Show("Address not found. Please try again.", "Search Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error searching: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                // Reset cursor
+                Cursor = Cursors.Default;
+            }
+        }
         private void AddressSearchControl_AddressFound(object sender, AddressFoundEventArgs e)
         {
             try
@@ -630,14 +681,16 @@ namespace claudpro
             try
             {
                 isSettingLocation = true;
-                locationInstructionsLabel.Visible = true;
-                setLocationButton.Visible = false;
+
+                if (locationInstructionsLabel != null)
+                    locationInstructionsLabel.Visible = true;
 
                 // Change cursor to indicate map is clickable
-                gMapControl.Cursor = Cursors.Hand;
-
-                // Add event handler for map clicks
-                gMapControl.MouseClick += GMapControl_MouseClick;
+                if (gMapControl != null)
+                {
+                    gMapControl.Cursor = Cursors.Hand;
+                    gMapControl.MouseClick += GMapControl_MouseClick;
+                }
 
                 MessageBox.Show("Click on the map to set your starting location",
                     "Set Location", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -802,6 +855,11 @@ namespace claudpro
                 // Reset cursor
                 Cursor = Cursors.Default;
             }
+        }
+
+        private void DriverForm_Load(object sender, EventArgs e)
+        {
+
         }
     }
 }
