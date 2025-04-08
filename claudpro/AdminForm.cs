@@ -785,7 +785,7 @@ namespace claudpro
                 "Enable Automatic Scheduling",
                 new Point(20, 20),
                 new Size(250, 25),
-                true
+                false  // Default unchecked
             );
             panel.Controls.Add(enabledCheckBox);
 
@@ -803,44 +803,81 @@ namespace claudpro
             };
             panel.Controls.Add(timeSelector);
 
-            // Save button
-            var saveButton = ControlExtensions.CreateButton(
-                "Save Settings",
-                new Point(20, 100),
-                new Size(120, 30),
-                async (s, e) => {
-                    try
-                    {
-                        await dbService.SaveSchedulingSettingsAsync(
-                            enabledCheckBox.Checked,
-                            timeSelector.Value
-                        );
-
-                        MessageBox.Show("Scheduling settings saved successfully.",
-                            "Settings Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Error saving settings: {ex.Message}",
-                            "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
-            );
+            // Save button - create without lambda first
+            Button saveButton = new Button
+            {
+                Text = "Save Settings",
+                Location = new Point(20, 100),
+                Size = new Size(120, 30)
+            };
             panel.Controls.Add(saveButton);
 
-            // Run now button
-            // First declare the button variable
-            var runNowButton = new Button();
-
-            // Initialize properties
-            runNowButton.Text = "Run Scheduler Now";
-            runNowButton.Location = new Point(150, 100);
-            runNowButton.Size = new Size(150, 30);
-
-            // Add to panel
+            // Run now button - create without lambda first
+            Button runNowButton = new Button
+            {
+                Text = "Run Scheduler Now",
+                Location = new Point(150, 100),
+                Size = new Size(150, 30)
+            };
             panel.Controls.Add(runNowButton);
 
-            // AFTER adding to panel, attach the event handler
+            // History listview
+            var historyListView = new ListView
+            {
+                Location = new Point(20, 180),
+                Size = new Size(1100, 460),
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true
+            };
+            historyListView.Columns.Add("Date", 150);
+            historyListView.Columns.Add("Status", 100);
+            historyListView.Columns.Add("Routes Generated", 150);
+            historyListView.Columns.Add("Passengers Assigned", 150);
+            historyListView.Columns.Add("Run Time", 200);
+            panel.Controls.Add(historyListView);
+
+            // Section label
+            panel.Controls.Add(ControlExtensions.CreateLabel(
+                "Scheduling History:", new Point(20, 150), new Size(150, 25),
+                new Font("Arial", 10, FontStyle.Bold)));
+
+            // Refresh history button - create without lambda first
+            Button refreshHistoryButton = new Button
+            {
+                Text = "Refresh History",
+                Location = new Point(20, 650),
+                Size = new Size(150, 30)
+            };
+            panel.Controls.Add(refreshHistoryButton);
+
+            // Now add event handlers after all controls have been created
+            saveButton.Click += async (s, e) => {
+                try
+                {
+                    saveButton.Enabled = false;
+                    saveButton.Text = "Saving...";
+
+                    await dbService.SaveSchedulingSettingsAsync(
+                        enabledCheckBox.Checked,
+                        timeSelector.Value
+                    );
+
+                    MessageBox.Show("Scheduling settings saved successfully.",
+                        "Settings Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error saving settings: {ex.Message}",
+                        "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    saveButton.Enabled = true;
+                    saveButton.Text = "Save Settings";
+                }
+            };
+
             runNowButton.Click += async (s, e) => {
                 if (MessageBox.Show("Are you sure you want to run the scheduler now? This will calculate routes for tomorrow.",
                         "Confirm Run", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
@@ -850,9 +887,8 @@ namespace claudpro
                         runNowButton.Enabled = false;
                         runNowButton.Text = "Running...";
 
-                        // This would trigger the same code that the Windows Service runs
-                        // For demonstration purposes, we're calling a placeholder
                         await RunSchedulerAsync();
+                        await RefreshHistoryListView(historyListView);
 
                         MessageBox.Show("Scheduler completed successfully.",
                             "Scheduler Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -870,39 +906,231 @@ namespace claudpro
                 }
             };
 
-            // Scheduling history
-            panel.Controls.Add(ControlExtensions.CreateLabel(
-                "Scheduling History:", new Point(20, 150), new Size(150, 25),
-                new Font("Arial", 10, FontStyle.Bold)));
-
-            var historyListView = new ListView
-            {
-                Location = new Point(20, 180),
-                Size = new Size(1100, 460),
-                View = View.Details,
-                FullRowSelect = true,
-                GridLines = true
+            refreshHistoryButton.Click += async (s, e) => {
+                try
+                {
+                    refreshHistoryButton.Enabled = false;
+                    refreshHistoryButton.Text = "Refreshing...";
+                    await RefreshHistoryListView(historyListView);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error refreshing history: {ex.Message}",
+                        "Refresh Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    refreshHistoryButton.Enabled = true;
+                    refreshHistoryButton.Text = "Refresh History";
+                }
             };
-            historyListView.Columns.Add("Date", 150);
-            historyListView.Columns.Add("Status", 100);
-            historyListView.Columns.Add("Routes Generated", 150);
-            historyListView.Columns.Add("Passengers Assigned", 150);
-            historyListView.Columns.Add("Run Time", 200);
-            panel.Controls.Add(historyListView);
 
-            // Load scheduling settings when tab is selected
+            // Tab selection handler 
             tabControl.SelectedIndexChanged += async (s, e) => {
                 if (tabControl.SelectedTab == schedulingTab)
                 {
-                    var settings = await dbService.GetSchedulingSettingsAsync();
-                    enabledCheckBox.Checked = settings.IsEnabled;
-                    timeSelector.Value = settings.ScheduledTime;
+                    try
+                    {
+                        var settings = await dbService.GetSchedulingSettingsAsync();
+                        enabledCheckBox.Checked = settings.IsEnabled;
+                        timeSelector.Value = settings.ScheduledTime;
 
-                    // Would also load scheduling history here in a real implementation
+                        await RefreshHistoryListView(historyListView);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error loading scheduling settings: {ex.Message}",
+                            "Loading Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 }
             };
         }
 
+        // Separate method for refreshing the history ListView
+        private async Task RefreshHistoryListView(ListView listView)
+        {
+            if (listView == null)
+                return;
+
+            listView.Items.Clear();
+
+            try
+            {
+                var history = await dbService.GetSchedulingLogAsync();
+
+                foreach (var entry in history)
+                {
+                    var item = new ListViewItem(entry.RunTime.ToString("yyyy-MM-dd"));
+                    item.SubItems.Add(entry.Status);
+                    item.SubItems.Add(entry.RoutesGenerated.ToString());
+                    item.SubItems.Add(entry.PassengersAssigned.ToString());
+                    item.SubItems.Add(entry.RunTime.ToString("HH:mm:ss"));
+
+                    // Set item color based on status
+                    if (entry.Status == "Success")
+                        item.ForeColor = Color.Green;
+                    else if (entry.Status == "Failed" || entry.Status == "Error")
+                        item.ForeColor = Color.Red;
+                    else if (entry.Status == "Skipped")
+                        item.ForeColor = Color.Orange;
+
+                    listView.Items.Add(item);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error retrieving scheduling history: {ex.Message}",
+                    "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }        // Helper method to refresh the scheduling history
+        private async Task RefreshSchedulingHistoryAsync(ListView historyListView)
+        {
+            if (historyListView == null)
+                return;
+
+            historyListView.Items.Clear();
+
+            try
+            {
+                var history = await dbService.GetSchedulingLogAsync();
+
+                foreach (var entry in history)
+                {
+                    var item = new ListViewItem(entry.RunTime.ToString("yyyy-MM-dd"));
+                    item.SubItems.Add(entry.Status);
+                    item.SubItems.Add(entry.RoutesGenerated.ToString());
+                    item.SubItems.Add(entry.PassengersAssigned.ToString());
+                    item.SubItems.Add(entry.RunTime.ToString("HH:mm:ss"));
+
+                    // Set item color based on status
+                    if (entry.Status == "Success")
+                        item.ForeColor = Color.Green;
+                    else if (entry.Status == "Failed" || entry.Status == "Error")
+                        item.ForeColor = Color.Red;
+                    else if (entry.Status == "Skipped")
+                        item.ForeColor = Color.Orange;
+
+                    historyListView.Items.Add(item);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error retrieving scheduling history: {ex.Message}",
+                    "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // Implementation of RunSchedulerAsync that's called from the Run Now button
+        private async Task RunSchedulerAsync()
+        {
+            try
+            {
+                // Get destination information
+                var destination = await dbService.GetDestinationAsync();
+
+                // Get available vehicles and passengers
+                var vehicles = await dbService.GetAvailableVehiclesAsync();
+                var passengers = await dbService.GetAvailablePassengersAsync();
+
+                // Only run if there are passengers and vehicles
+                if (passengers.Count > 0 && vehicles.Count > 0)
+                {
+                    // Create a routing service
+                    var routingService = new RoutingService(mapService, destination.Latitude, destination.Longitude);
+
+                    // Create the solver
+                    var solver = new RideSharingGenetic(
+                        passengers,
+                        vehicles,
+                        200, // Population size
+                        destination.Latitude,
+                        destination.Longitude,
+                        GetTargetTimeInMinutes(destination.TargetTime)
+                    );
+
+                    // Run the algorithm
+                    var solution = solver.Solve(150); // Generations
+
+                    if (solution != null)
+                    {
+                        // Calculate route details
+                        routingService.CalculateEstimatedRouteDetails(solution);
+
+                        // Save the solution to database for tomorrow's date
+                        string tomorrowDate = DateTime.Now.AddDays(1).ToString("yyyy-MM-dd");
+                        int routeId = await dbService.SaveSolutionAsync(solution, tomorrowDate);
+
+                        // Count assigned passengers and used vehicles
+                        int assignedPassengers = solution.Vehicles.Sum(v => v.AssignedPassengers?.Count ?? 0);
+                        int usedVehicles = solution.Vehicles.Count(v => v.AssignedPassengers?.Count > 0);
+
+                        // Log the scheduling run explicitly to the database
+                        await dbService.LogSchedulingRunAsync(
+                            DateTime.Now,
+                            "Success",
+                            usedVehicles,
+                            assignedPassengers,
+                            $"Created routes for {tomorrowDate}"
+                        );
+                    }
+                    else
+                    {
+                        await dbService.LogSchedulingRunAsync(
+                            DateTime.Now,
+                            "Failed",
+                            0,
+                            0,
+                            "Algorithm failed to find a valid solution"
+                        );
+                        throw new Exception("Algorithm failed to find a valid solution");
+                    }
+                }
+                else
+                {
+                    await dbService.LogSchedulingRunAsync(
+                        DateTime.Now,
+                        "Skipped",
+                        0,
+                        0,
+                        $"Insufficient participants: {passengers.Count} passengers, {vehicles.Count} vehicles"
+                    );
+                    throw new Exception($"No routes generated: {passengers.Count} passengers, {vehicles.Count} vehicles available");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log exception
+                try
+                {
+                    await dbService.LogSchedulingRunAsync(
+                        DateTime.Now,
+                        "Error",
+                        0,
+                        0,
+                        ex.Message
+                    );
+                }
+                catch
+                {
+                    // Just in case writing to the database also fails
+                }
+
+                throw; // Re-throw to show error to the user
+            }
+        }
+
+        // Helper method to convert target time to minutes
+        private int GetTargetTimeInMinutes(string targetTime)
+        {
+            // Convert a time string like "08:00:00" to minutes from midnight
+            if (TimeSpan.TryParse(targetTime, out TimeSpan time))
+            {
+                return (int)time.TotalMinutes;
+            }
+
+            // Default to 8:00 AM (480 minutes)
+            return 480;
+        }
         #endregion
 
         #region Data Loading and Display
@@ -1222,19 +1450,7 @@ namespace claudpro
                 "Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private async Task RunSchedulerAsync()
-        {
-            // Placeholder for running the scheduler
-            // This would be connected to the actual scheduling algorithm in a real implementation
-            await Task.Delay(2000); // Simulate processing
 
-            // In a real implementation, this would:
-            // 1. Get the destination info
-            // 2. Get all available vehicles and passengers for tomorrow
-            // 3. Run the ride-sharing algorithm
-            // 4. Save the solution for tomorrow's date
-            // 5. Optionally send notifications to users
-        }
 
         private void AdminForm_Load(object sender, EventArgs e)
         {
