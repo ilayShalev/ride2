@@ -215,47 +215,6 @@ namespace claudpro
             leftPanel.Controls.Add(locationInstructionsLabel);
         }
 
-        private async Task LoadPassengerDataAsync()
-        {
-            refreshButton.Enabled = false;
-            assignmentDetailsTextBox.Clear();
-            assignmentDetailsTextBox.AppendText("Loading ride details...\n");
-
-            try
-            {
-                // Load passenger data
-                passenger = await dbService.GetPassengerByUserIdAsync(userId);
-
-                if (passenger != null)
-                {
-                    // Update UI to reflect passenger data
-                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
-
-                    // Try to load assigned vehicle if available
-                    var assignment = await dbService.GetPassengerAssignmentAsync(userId, DateTime.Now.ToString("yyyy-MM-dd"));
-                    assignedVehicle = assignment.AssignedVehicle;
-                    pickupTime = assignment.PickupTime;
-
-                    // Display data on map and in text
-                    DisplayPassengerOnMap();
-                    UpdateAssignmentDetailsText();
-                }
-                else
-                {
-                    assignmentDetailsTextBox.Clear();
-                    assignmentDetailsTextBox.AppendText("No passenger profile found. Set your location to create a profile.\n");
-                }
-            }
-            catch (Exception ex)
-            {
-                assignmentDetailsTextBox.Clear();
-                assignmentDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
-            }
-            finally
-            {
-                refreshButton.Enabled = true;
-            }
-        }
 
         private void EnableMapLocationSelection()
         {
@@ -385,52 +344,8 @@ namespace claudpro
             }
         }
 
-        private void DisplayPassengerOnMap()
-        {
-            if (passenger == null) return;
 
-            gMapControl.Overlays.Clear();
-
-            var passengersOverlay = new GMapOverlay("passengers");
-            var marker = MapOverlays.CreatePassengerMarker(passenger);
-            passengersOverlay.Markers.Add(marker);
-
-            // Create destination overlay if assigned vehicle exists
-            if (assignedVehicle != null)
-            {
-                var vehiclesOverlay = new GMapOverlay("vehicles");
-                var vehicleMarker = MapOverlays.CreateVehicleMarker(assignedVehicle);
-                vehiclesOverlay.Markers.Add(vehicleMarker);
-
-                // Get destination from database asynchronously
-                Task.Run(async () => {
-                    var destination = await dbService.GetDestinationAsync();
-                    this.Invoke(new Action(() => {
-                        var destinationOverlay = new GMapOverlay("destination");
-                        var destinationMarker = MapOverlays.CreateDestinationMarker(destination.Latitude, destination.Longitude);
-                        destinationOverlay.Markers.Add(destinationMarker);
-
-                        // Need to clear and re-add all overlays to ensure proper z-order
-                        gMapControl.Overlays.Clear();
-                        gMapControl.Overlays.Add(vehiclesOverlay);
-                        gMapControl.Overlays.Add(passengersOverlay);
-                        gMapControl.Overlays.Add(destinationOverlay);
-                        gMapControl.Refresh();
-                    }));
-                });
-            }
-            else
-            {
-                // Just show the passenger marker
-                gMapControl.Overlays.Add(passengersOverlay);
-            }
-
-            // Position map on passenger location
-            gMapControl.Position = new PointLatLng(passenger.Latitude, passenger.Longitude);
-            gMapControl.Zoom = 15;
-            gMapControl.Refresh();
-        }
-
+        // Updated UpdateAssignmentDetailsText method to display pickup time
         private void UpdateAssignmentDetailsText()
         {
             if (assignmentDetailsTextBox == null) return;
@@ -478,9 +393,19 @@ namespace claudpro
                     if (!string.IsNullOrEmpty(assignedVehicle.LicensePlate))
                         assignmentDetailsTextBox.AppendText($"License Plate: {assignedVehicle.LicensePlate}\n");
 
-                    if (pickupTime.HasValue)
+                    // Show pickup time from passenger object first (this comes from algorithm calculation)
+                    if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                     {
-                        assignmentDetailsTextBox.AppendText($"Estimated Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                        assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                        assignmentDetailsTextBox.AppendText($"Pickup Time: {passenger.EstimatedPickupTime}\n");
+                        assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
+                    }
+                    // Fall back to pickupTime from database if EstimatedPickupTime is not set
+                    else if (pickupTime.HasValue)
+                    {
+                        assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
+                        assignmentDetailsTextBox.AppendText($"Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                        assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
                     }
                     else
                     {
@@ -508,6 +433,127 @@ namespace claudpro
             }
         }
 
+        // Updated LoadPassengerDataAsync to get the complete passenger details with EstimatedPickupTime
+        private async Task LoadPassengerDataAsync()
+        {
+            refreshButton.Enabled = false;
+            assignmentDetailsTextBox.Clear();
+            assignmentDetailsTextBox.AppendText("Loading ride details...\n");
+
+            try
+            {
+                // Load passenger data
+                passenger = await dbService.GetPassengerByUserIdAsync(userId);
+
+                if (passenger != null)
+                {
+                    // Update UI to reflect passenger data
+                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
+
+                    // Try to load assigned vehicle if available
+                    var assignment = await dbService.GetPassengerAssignmentAsync(userId, DateTime.Now.ToString("yyyy-MM-dd"));
+                    assignedVehicle = assignment.AssignedVehicle;
+                    pickupTime = assignment.PickupTime;
+
+                    // Get the full passenger details including the estimated pickup time
+                    if (passenger.Id > 0)
+                    {
+                        var fullPassenger = await dbService.GetPassengerByIdAsync(passenger.Id);
+                        if (fullPassenger != null && !string.IsNullOrEmpty(fullPassenger.EstimatedPickupTime))
+                        {
+                            passenger.EstimatedPickupTime = fullPassenger.EstimatedPickupTime;
+                        }
+                    }
+
+                    // Display data on map and in text
+                    DisplayPassengerOnMap();
+                    UpdateAssignmentDetailsText();
+                }
+                else
+                {
+                    assignmentDetailsTextBox.Clear();
+                    assignmentDetailsTextBox.AppendText("No passenger profile found. Set your location to create a profile.\n");
+                }
+            }
+            catch (Exception ex)
+            {
+                assignmentDetailsTextBox.Clear();
+                assignmentDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
+            }
+            finally
+            {
+                refreshButton.Enabled = true;
+            }
+        }
+
+        // Updated DisplayPassengerOnMap to show routes
+        private void DisplayPassengerOnMap()
+        {
+            if (passenger == null) return;
+
+            gMapControl.Overlays.Clear();
+
+            var passengersOverlay = new GMapOverlay("passengers");
+            var routesOverlay = new GMapOverlay("routes");
+
+            // Create passenger marker
+            var marker = MapOverlays.CreatePassengerMarker(passenger);
+            passengersOverlay.Markers.Add(marker);
+
+            gMapControl.Overlays.Add(routesOverlay);
+            gMapControl.Overlays.Add(passengersOverlay);
+
+            // Create destination overlay and vehicle overlay if there's an assigned vehicle
+            if (assignedVehicle != null)
+            {
+                var vehiclesOverlay = new GMapOverlay("vehicles");
+                var vehicleMarker = MapOverlays.CreateVehicleMarker(assignedVehicle);
+                vehiclesOverlay.Markers.Add(vehicleMarker);
+                gMapControl.Overlays.Add(vehiclesOverlay);
+
+                // Get destination and create route
+                Task.Run(async () => {
+                    var destination = await dbService.GetDestinationAsync();
+                    this.Invoke(new Action(() => {
+                        try
+                        {
+                            // Create destination marker
+                            var destinationOverlay = new GMapOverlay("destination");
+                            var destinationMarker = MapOverlays.CreateDestinationMarker(destination.Latitude, destination.Longitude);
+                            destinationOverlay.Markers.Add(destinationMarker);
+                            gMapControl.Overlays.Add(destinationOverlay);
+
+                            // Create route points
+                            var routePoints = new List<PointLatLng>();
+
+                            // Add vehicle starting point
+                            routePoints.Add(new PointLatLng(assignedVehicle.StartLatitude, assignedVehicle.StartLongitude));
+
+                            // Add passenger location
+                            routePoints.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
+
+                            // Add destination
+                            routePoints.Add(new PointLatLng(destination.Latitude, destination.Longitude));
+
+                            // Create route
+                            var route = MapOverlays.CreateRoute(routePoints, "PassengerRoute", Color.Blue);
+                            routesOverlay.Routes.Add(route);
+
+                            gMapControl.Refresh();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error creating route: {ex.Message}");
+                        }
+                    }));
+                });
+            }
+
+            // Position map on passenger location
+            gMapControl.Position = new PointLatLng(passenger.Latitude, passenger.Longitude);
+            gMapControl.Zoom = 15;
+            gMapControl.Refresh();
+        }
         private async Task UpdateAvailabilityAsync()
         {
             if (passenger == null)

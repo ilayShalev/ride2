@@ -205,6 +205,9 @@ namespace RideMatchScheduler
             }
         }
 
+        // Update the RunAlgorithmAsync method in RideMatchSchedulerService.cs
+        // to use Google API for time calculations based on desired arrival time
+
         private async Task RunAlgorithmAsync()
         {
             try
@@ -240,8 +243,11 @@ namespace RideMatchScheduler
 
                     if (solution != null)
                     {
-                        // Calculate route details
-                        routingService.CalculateEstimatedRouteDetails(solution);
+                        // Use Google API to calculate accurate route details including arrival times
+                        await routingService.GetGoogleRoutesAsync(null, solution);
+
+                        // Calculate backward from target arrival time to determine pickup times
+                        await CalculatePickupTimesBasedOnTargetArrival(solution, destination.TargetTime, routingService);
 
                         // Save the solution to database for tomorrow's date
                         string tomorrowDate = DateTime.Now.AddDays(1).ToString("yyyy-MM-dd");
@@ -306,9 +312,60 @@ namespace RideMatchScheduler
                 {
                     // Just in case writing to the database also fails
                 }
+
+                throw; // Re-throw to show error to the user
             }
         }
 
+        // New method to calculate pickup times based on desired arrival time at destination
+        private async Task CalculatePickupTimesBasedOnTargetArrival(Solution solution, string targetTimeString, RoutingService routingService)
+        {
+            // Parse target arrival time
+            if (!TimeSpan.TryParse(targetTimeString, out TimeSpan targetTime))
+            {
+                targetTime = new TimeSpan(8, 0, 0); // Default to 8:00 AM
+            }
+
+            // Get the target time as DateTime for today (we'll use just the time portion)
+            DateTime targetDateTime = DateTime.Today.Add(targetTime);
+
+            foreach (var vehicle in solution.Vehicles)
+            {
+                if (vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
+                    continue;
+
+                var routeDetails = routingService.VehicleRouteDetails.GetValueOrDefault(vehicle.Id);
+                if (routeDetails == null)
+                    continue;
+
+                // Get total trip time from start to destination in minutes
+                double totalTripTime = routeDetails.TotalTime;
+
+                // Calculate when driver needs to start to arrive at destination at target time
+                DateTime driverStartTime = targetDateTime.AddMinutes(-totalTripTime);
+
+                // Store the driver's departure time
+                vehicle.DepartureTime = driverStartTime.ToString("HH:mm");
+
+                // Now calculate each passenger's pickup time based on cumulative time from start
+                double cumulativeTimeFromStart = 0;
+                for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
+                {
+                    var passenger = vehicle.AssignedPassengers[i];
+
+                    // Find corresponding stop detail
+                    var stopDetail = routeDetails.StopDetails.FirstOrDefault(s => s.PassengerId == passenger.Id);
+                    if (stopDetail != null)
+                    {
+                        cumulativeTimeFromStart = stopDetail.CumulativeTime;
+
+                        // Calculate pickup time based on driver start time plus cumulative time to this passenger
+                        DateTime pickupTime = driverStartTime.AddMinutes(cumulativeTimeFromStart);
+                        passenger.EstimatedPickupTime = pickupTime.ToString("HH:mm");
+                    }
+                }
+            }
+        }
         private int GetTargetTimeInMinutes(string targetTime)
         {
             // Convert a time string like "08:00:00" to minutes from midnight

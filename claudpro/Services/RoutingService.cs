@@ -130,23 +130,29 @@ namespace claudpro.Services
         /// <summary>
         /// Gets detailed route information using Google Maps Directions API
         /// </summary>
+        // Update GetGoogleRoutesAsync in RoutingService.cs to support null GMapControl
         public async Task GetGoogleRoutesAsync(GMapControl mapControl, Solution solution)
         {
             if (solution == null) return;
 
-            var routesOverlay = mapControl.Overlays.FirstOrDefault(o => o.Id == "routes");
-            if (routesOverlay == null)
+            // Initialize overlays only if mapControl is provided
+            GMapOverlay routesOverlay = null;
+            if (mapControl != null)
             {
-                routesOverlay = new GMapOverlay("routes");
-                mapControl.Overlays.Add(routesOverlay);
-            }
-            else
-            {
-                routesOverlay.Routes.Clear();
+                routesOverlay = mapControl.Overlays.FirstOrDefault(o => o.Id == "routes");
+                if (routesOverlay == null)
+                {
+                    routesOverlay = new GMapOverlay("routes");
+                    mapControl.Overlays.Add(routesOverlay);
+                }
+                else
+                {
+                    routesOverlay.Routes.Clear();
+                }
             }
 
             VehicleRouteDetails.Clear();
-            var colors = MapOverlays.GetRouteColors();
+            var colors = mapControl != null ? MapOverlays.GetRouteColors() : null;
 
             for (int i = 0; i < solution.Vehicles.Count; i++)
             {
@@ -162,11 +168,14 @@ namespace claudpro.Services
                     vehicle.TotalTime = routeDetails.TotalTime;
                 }
 
+                // Skip route visualization if no map control provided (headless mode)
+                if (mapControl == null) continue;
+
                 // Create route points
                 var points = new List<PointLatLng>
-                {
-                    new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
-                };
+        {
+            new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude)
+        };
 
                 foreach (var passenger in vehicle.AssignedPassengers)
                 {
@@ -189,9 +198,12 @@ namespace claudpro.Services
                 routesOverlay.Routes.Add(route);
             }
 
-            mapControl.Zoom = mapControl.Zoom; // Force refresh
+            // Refresh map if present
+            if (mapControl != null)
+            {
+                mapControl.Zoom = mapControl.Zoom; // Force refresh
+            }
         }
-
         /// <summary>
         /// Calculates estimated route details for a solution without using Google API
         /// </summary>

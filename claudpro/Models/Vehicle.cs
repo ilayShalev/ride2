@@ -1,4 +1,5 @@
-﻿using System;
+﻿// Update the Vehicle class to include DepartureTime property
+using System;
 using System.Collections.Generic;
 
 namespace claudpro.Models
@@ -25,6 +26,9 @@ namespace claudpro.Models
         // Route metrics
         public double TotalDistance { get; set; }
         public double TotalTime { get; set; }
+
+        // Departure time calculated by scheduler
+        public string DepartureTime { get; set; }
 
         // Availability for scheduling
         public bool IsAvailableTomorrow { get; set; } = true;
