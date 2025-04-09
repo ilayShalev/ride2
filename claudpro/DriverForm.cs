@@ -421,9 +421,9 @@ namespace claudpro
         }
 
         // Update the DisplayPassengerOnMap method in DriverForm.cs to show routes
-        private void DisplayPassengerOnMap()
+        private void DisplayVehicleAndRouteOnMap()
         {
-            if (passenger == null) return;
+            if (vehicle == null) return;
 
             gMapControl.Overlays.Clear();
 
@@ -432,19 +432,30 @@ namespace claudpro
             var routesOverlay = new GMapOverlay("routes");
             var destinationOverlay = new GMapOverlay("destination");
 
-            // Add passenger marker
-            var marker = MapOverlays.CreatePassengerMarker(passenger);
-            passengersOverlay.Markers.Add(marker);
+            // Add vehicle marker
+            var vehicleMarker = MapOverlays.CreateVehicleMarker(vehicle);
+            vehiclesOverlay.Markers.Add(vehicleMarker);
 
+            // Add passenger markers for assigned passengers
+            if (vehicle.AssignedPassengers != null)
+            {
+                foreach (var p in vehicle.AssignedPassengers)
+                {
+                    var marker = MapOverlays.CreatePassengerMarker(p);
+                    passengersOverlay.Markers.Add(marker);
+                }
+            }
+
+            // Add the overlays to the map
             gMapControl.Overlays.Add(routesOverlay);
             gMapControl.Overlays.Add(passengersOverlay);
+            gMapControl.Overlays.Add(vehiclesOverlay);
+            gMapControl.Overlays.Add(destinationOverlay);
 
-            // Position map on passenger location
-            gMapControl.Position = new PointLatLng(passenger.Latitude, passenger.Longitude);
-            gMapControl.Zoom = 15;
-        }
-
-        // Updated ShowRouteOnMap method to properly display routes
+            // Position map on vehicle location
+            gMapControl.Position = new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude);
+            gMapControl.Zoom = 12;
+        }        // Updated ShowRouteOnMap method to properly display routes
         private void ShowRouteOnMap()
         {
             if (gMapControl == null || vehicle == null) return;

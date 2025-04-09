@@ -1053,6 +1053,7 @@ namespace claudpro
 
                     if (solution != null)
                     {
+
                         // Calculate route details
                         routingService.CalculateEstimatedRouteDetails(solution);
 

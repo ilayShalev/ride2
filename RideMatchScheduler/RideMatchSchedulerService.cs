@@ -334,7 +334,11 @@ namespace RideMatchScheduler
                 if (vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
                     continue;
 
-                var routeDetails = routingService.VehicleRouteDetails.GetValueOrDefault(vehicle.Id);
+                RouteDetails routeDetails = null;
+                if (routingService.VehicleRouteDetails.ContainsKey(vehicle.Id))
+                {
+                    routeDetails = routingService.VehicleRouteDetails[vehicle.Id];
+                }
                 if (routeDetails == null)
                     continue;
 
