@@ -41,8 +41,8 @@ namespace claudpro
         private string destinationAddress;
         private string destinationTargetTime;
 
-
-
+        // Route details text box
+        private RichTextBox routeDetailsTextBox;
 
         public AdminForm(DatabaseService dbService, MapService mapService)
         {
@@ -584,6 +584,55 @@ namespace claudpro
             routesPanel.Controls.Add(routesListView);
             routesPanel.Controls.Add(routeDetailsTextBox);
 
+            // Add the "Get Google Routes" button
+            // Create the button first without the event handler
+            var getGoogleRoutesButton = new Button
+            {
+                Text = "Get Google Routes",
+                Location = new Point(520, 10),
+                Size = new Size(150, 30)
+            };
+            routesTab.Controls.Add(getGoogleRoutesButton);
+
+            // Now add the event handler after the button is fully declared
+            getGoogleRoutesButton.Click += async (s, e) => {
+                try
+                {
+                    if (currentSolution == null)
+                    {
+                        MessageBox.Show("Please load a route first!", "No Route Loaded",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    getGoogleRoutesButton.Enabled = false;
+                    getGoogleRoutesButton.Text = "Getting Routes...";
+
+                    // Create a new routing service with the destination
+                    var destination = await dbService.GetDestinationAsync();
+                    var tempRoutingService = new RoutingService(mapService, destination.Latitude, destination.Longitude);
+
+                    // Get the Google routes
+                    await tempRoutingService.GetGoogleRoutesAsync(gMapControl, currentSolution);
+
+                    // Update the UI
+                    UpdateRouteDetailsDisplay();
+
+                    MessageBox.Show("Routes updated with Google API data!", "Routes Updated",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error getting Google routes: {ex.Message}",
+                        "API Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    getGoogleRoutesButton.Enabled = true;
+                    getGoogleRoutesButton.Text = "Get Google Routes";
+                }
+            };
+
             // Select route to view details
             routesListView.SelectedIndexChanged += (s, e) => {
                 if (routesListView.SelectedItems.Count > 0)
@@ -593,7 +642,6 @@ namespace claudpro
                 }
             };
         }
-
         private void SetupDestinationTab()
         {
             // Destination edit panel
@@ -745,19 +793,18 @@ namespace claudpro
 
             // Load destination info when tab is selected
             tabControl.SelectedIndexChanged += async (s, e) => {
-                if (tabControl.SelectedTab == destinationTab)
-                {
-                    var dest = await dbService.GetDestinationAsync();
-                    nameTextBox.Text = dest.Name;
-                    timeTextBox.Text = dest.TargetTime;
-                    latTextBox.Text = dest.Latitude.ToString();
-                    lngTextBox.Text = dest.Longitude.ToString();
-                    addressTextBox.Text = dest.Address;
+            if (tabControl.SelectedTab == destinationTab)
+            {
+                var dest = await dbService.GetDestinationAsync();
+                nameTextBox.Text = dest.Name;
+                timeTextBox.Text = dest.TargetTime;
+                latTextBox.Text = dest.Latitude.ToString();
+                lngTextBox.Text = dest.Longitude.ToString();
+                addressTextBox.Text = dest.Address;
 
-                    // Show on map
-                    gMapControl.Position = new GMap.NET.PointLatLng(dest.Latitude, dest.Longitude);
-                    gMapControl.Zoom = 15;
-
+                // Show on map
+                gMapControl.Position = new GMap.NET.PointLatLng(dest.Latitude, dest.Longitude);
+                gMapControl.Zoom = 15;
                     gMapControl.Overlays.Clear();
                     var overlay = new GMap.NET.WindowsForms.GMapOverlay("destinationMarker");
                     var marker = new GMap.NET.WindowsForms.Markers.GMarkerGoogle(
@@ -821,11 +868,20 @@ namespace claudpro
             };
             panel.Controls.Add(runNowButton);
 
+            // Add Google API setting
+            var useGoogleApiCheckBox = ControlExtensions.CreateCheckBox(
+                "Always Use Google Routes API",
+                new Point(20, 140),
+                new Size(270, 20),
+                true
+            );
+            panel.Controls.Add(useGoogleApiCheckBox);
+
             // History listview
             var historyListView = new ListView
             {
-                Location = new Point(20, 180),
-                Size = new Size(1100, 460),
+                Location = new Point(20, 200),
+                Size = new Size(1100, 440),
                 View = View.Details,
                 FullRowSelect = true,
                 GridLines = true
@@ -839,7 +895,7 @@ namespace claudpro
 
             // Section label
             panel.Controls.Add(ControlExtensions.CreateLabel(
-                "Scheduling History:", new Point(20, 150), new Size(150, 25),
+                "Scheduling History:", new Point(20, 170), new Size(150, 25),
                 new Font("Arial", 10, FontStyle.Bold)));
 
             // Refresh history button - create without lambda first
@@ -875,6 +931,25 @@ namespace claudpro
                 {
                     saveButton.Enabled = true;
                     saveButton.Text = "Save Settings";
+                }
+            };
+
+            // Save Google API setting
+            useGoogleApiCheckBox.CheckedChanged += async (s, e) => {
+                try
+                {
+                    await dbService.SaveSettingAsync("UseGoogleRoutesAPI",
+                        useGoogleApiCheckBox.Checked ? "1" : "0");
+
+                    MessageBox.Show(useGoogleApiCheckBox.Checked ?
+                        "The scheduler will now use Google Routes API for all routes" :
+                        "The scheduler will use estimated routes (no API calls)",
+                        "Setting Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error saving setting: {ex.Message}",
+                        "Save Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             };
 
@@ -935,6 +1010,10 @@ namespace claudpro
                         enabledCheckBox.Checked = settings.IsEnabled;
                         timeSelector.Value = settings.ScheduledTime;
 
+                        // Load Google API setting
+                        var useGoogleApi = await dbService.GetSettingAsync("UseGoogleRoutesAPI", "1");
+                        useGoogleApiCheckBox.Checked = useGoogleApi == "1";
+
                         await RefreshHistoryListView(historyListView);
                     }
                     catch (Exception ex)
@@ -982,42 +1061,6 @@ namespace claudpro
                 MessageBox.Show($"Error retrieving scheduling history: {ex.Message}",
                     "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-        }        // Helper method to refresh the scheduling history
-        private async Task RefreshSchedulingHistoryAsync(ListView historyListView)
-        {
-            if (historyListView == null)
-                return;
-
-            historyListView.Items.Clear();
-
-            try
-            {
-                var history = await dbService.GetSchedulingLogAsync();
-
-                foreach (var entry in history)
-                {
-                    var item = new ListViewItem(entry.RunTime.ToString("yyyy-MM-dd"));
-                    item.SubItems.Add(entry.Status);
-                    item.SubItems.Add(entry.RoutesGenerated.ToString());
-                    item.SubItems.Add(entry.PassengersAssigned.ToString());
-                    item.SubItems.Add(entry.RunTime.ToString("HH:mm:ss"));
-
-                    // Set item color based on status
-                    if (entry.Status == "Success")
-                        item.ForeColor = Color.Green;
-                    else if (entry.Status == "Failed" || entry.Status == "Error")
-                        item.ForeColor = Color.Red;
-                    else if (entry.Status == "Skipped")
-                        item.ForeColor = Color.Orange;
-
-                    historyListView.Items.Add(item);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error retrieving scheduling history: {ex.Message}",
-                    "Database Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
         }
 
         // Implementation of RunSchedulerAsync that's called from the Run Now button
@@ -1053,9 +1096,41 @@ namespace claudpro
 
                     if (solution != null)
                     {
+                        // After running the algorithm, apply routes based on settings
+                        try
+                        {
+                            // Check if Google Routes API should be used
+                            string useGoogleApi = await dbService.GetSettingAsync("UseGoogleRoutesAPI", "1");
+                            bool shouldUseGoogleApi = useGoogleApi == "1";
 
-                        // Calculate route details
-                        routingService.CalculateEstimatedRouteDetails(solution);
+                            // Always calculate estimated routes first as a fallback
+                            routingService.CalculateEstimatedRouteDetails(solution);
+
+                            if (shouldUseGoogleApi)
+                            {
+                                try
+                                {
+                                    // Try to get routes from Google API
+                                    MessageBox.Show("Fetching routes from Google Maps API...", "Status", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                    await routingService.GetGoogleRoutesAsync(null, solution);
+                                    MessageBox.Show("Successfully retrieved routes from Google Maps API", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                }
+                                catch (Exception ex)
+                                {
+                                    // If Google API fails, we already have the estimated routes calculated
+                                    MessageBox.Show($"Google API request failed: {ex.Message}. Using estimated routes instead.",
+                                        "API Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                }
+                            }
+
+                            // Calculate backward from target arrival time to determine pickup times
+                            await CalculatePickupTimesBasedOnTargetArrival(solution, destination.TargetTime, routingService);
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Error calculating routes: {ex.Message}",
+                                "Route Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
 
                         // Save the solution to database for tomorrow's date
                         string tomorrowDate = DateTime.Now.AddDays(1).ToString("yyyy-MM-dd");
@@ -1120,6 +1195,60 @@ namespace claudpro
             }
         }
 
+        // Method to calculate pickup times based on desired arrival time at destination
+        private async Task CalculatePickupTimesBasedOnTargetArrival(Solution solution, string targetTimeString, RoutingService routingService)
+        {
+            // Parse target arrival time
+            if (!TimeSpan.TryParse(targetTimeString, out TimeSpan targetTime))
+            {
+                targetTime = new TimeSpan(8, 0, 0); // Default to 8:00 AM
+            }
+
+            // Get the target time as DateTime for today (we'll use just the time portion)
+            DateTime targetDateTime = DateTime.Today.Add(targetTime);
+
+            foreach (var vehicle in solution.Vehicles)
+            {
+                if (vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0)
+                    continue;
+
+                RouteDetails routeDetails = null;
+                if (routingService.VehicleRouteDetails.ContainsKey(vehicle.Id))
+                {
+                    routeDetails = routingService.VehicleRouteDetails[vehicle.Id];
+                }
+                if (routeDetails == null)
+                    continue;
+
+                // Get total trip time from start to destination in minutes
+                double totalTripTime = routeDetails.TotalTime;
+
+                // Calculate when driver needs to start to arrive at destination at target time
+                DateTime driverStartTime = targetDateTime.AddMinutes(-totalTripTime);
+
+                // Store the driver's departure time
+                vehicle.DepartureTime = driverStartTime.ToString("HH:mm");
+
+                // Now calculate each passenger's pickup time based on cumulative time from start
+                double cumulativeTimeFromStart = 0;
+                for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
+                {
+                    var passenger = vehicle.AssignedPassengers[i];
+
+                    // Find corresponding stop detail
+                    var stopDetail = routeDetails.StopDetails.FirstOrDefault(s => s.PassengerId == passenger.Id);
+                    if (stopDetail != null)
+                    {
+                        cumulativeTimeFromStart = stopDetail.CumulativeTime;
+
+                        // Calculate pickup time based on driver start time plus cumulative time to this passenger
+                        DateTime pickupTime = driverStartTime.AddMinutes(cumulativeTimeFromStart);
+                        passenger.EstimatedPickupTime = pickupTime.ToString("HH:mm");
+                    }
+                }
+            }
+        }
+
         // Helper method to convert target time to minutes
         private int GetTargetTimeInMinutes(string targetTime)
         {
@@ -1132,6 +1261,7 @@ namespace claudpro
             // Default to 8:00 AM (480 minutes)
             return 480;
         }
+
         #endregion
 
         #region Data Loading and Display
@@ -1400,8 +1530,17 @@ namespace claudpro
             routeDetailsTextBox.AppendText($"Driver: {vehicle.DriverName ?? $"Driver {vehicleId}"}\n");
             routeDetailsTextBox.AppendText($"Vehicle Capacity: {vehicle.Capacity}\n");
             routeDetailsTextBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
-            routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n\n");
+            routeDetailsTextBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
 
+            // Add departure time if available
+            if (!string.IsNullOrEmpty(vehicle.DepartureTime))
+            {
+                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                routeDetailsTextBox.AppendText($"Departure Time: {vehicle.DepartureTime}\n");
+                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+            }
+
+            routeDetailsTextBox.AppendText("\n");
             routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
             routeDetailsTextBox.AppendText("Pickup Order:\n");
             routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
@@ -1422,16 +1561,115 @@ namespace claudpro
                     : $"({passenger.Latitude:F4}, {passenger.Longitude:F4})";
                 routeDetailsTextBox.AppendText($"   Pickup at: {location}\n");
 
+                // Display estimated pickup time if available
                 if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                 {
+                    routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                     routeDetailsTextBox.AppendText($"   Estimated pickup time: {passenger.EstimatedPickupTime}\n");
+                    routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                 }
 
                 routeDetailsTextBox.AppendText("\n");
             }
         }
+        private void UpdateRouteDetailsDisplay()
+        {
+            routeDetailsTextBox.Clear();
 
-        private RichTextBox routeDetailsTextBox;
+            if (routingService.VehicleRouteDetails.Count == 0)
+            {
+                routeDetailsTextBox.AppendText("No route details available.\n\n");
+                routeDetailsTextBox.AppendText("Load a route and use the 'Get Google Routes' button to see detailed timing information.");
+                return;
+            }
+
+            foreach (var detail in routingService.VehicleRouteDetails.Values.OrderBy(d => d.VehicleId))
+            {
+                // Get vehicle info
+                var vehicle = currentSolution.Vehicles.FirstOrDefault(v => v.Id == detail.VehicleId);
+                string startLocation = vehicle != null && !string.IsNullOrEmpty(vehicle.StartAddress)
+                    ? vehicle.StartAddress
+                    : $"({vehicle?.StartLatitude ?? 0:F4}, {vehicle?.StartLongitude ?? 0:F4})";
+
+                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                routeDetailsTextBox.AppendText($"Vehicle {detail.VehicleId}\n");
+                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                routeDetailsTextBox.AppendText($"Start Location: {startLocation}\n");
+                routeDetailsTextBox.AppendText($"Driver: {vehicle?.DriverName ?? "Unknown"}\n");
+                routeDetailsTextBox.AppendText($"Total Distance: {detail.TotalDistance:F2} km\n");
+                routeDetailsTextBox.AppendText($"Total Time: {detail.TotalTime:F2} min\n");
+
+                if (!string.IsNullOrEmpty(vehicle?.DepartureTime))
+                {
+                    routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                    routeDetailsTextBox.AppendText($"Departure Time: {vehicle.DepartureTime}\n");
+                    routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                }
+
+                routeDetailsTextBox.AppendText("\n");
+
+                routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                routeDetailsTextBox.AppendText("Stop Details:\n");
+                routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+
+                int stopNumber = 1;
+                foreach (var stop in detail.StopDetails)
+                {
+                    // For stops that are passengers
+                    if (stop.PassengerId >= 0)
+                    {
+                        var passenger = vehicle?.AssignedPassengers?.FirstOrDefault(p => p.Id == stop.PassengerId);
+                        string stopName = passenger != null ? passenger.Name : $"Passenger {stop.PassengerName}";
+                        string stopLocation = passenger != null && !string.IsNullOrEmpty(passenger.Address)
+                            ? passenger.Address
+                            : $"({passenger?.Latitude ?? 0:F4}, {passenger?.Longitude ?? 0:F4})";
+
+                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                        routeDetailsTextBox.AppendText($"{stopNumber}. {stopName}\n");
+                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                        routeDetailsTextBox.AppendText($"   Location: {stopLocation}\n");
+
+                        // Display estimated pickup time if available
+                        if (passenger != null && !string.IsNullOrEmpty(passenger.EstimatedPickupTime))
+                        {
+                            routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                            routeDetailsTextBox.AppendText($"   Pickup Time: {passenger.EstimatedPickupTime}\n");
+                            routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                        }
+                    }
+                    else // For destination stop
+                    {
+                        string stopName = "Destination";
+
+                        // Try to get destination address
+                        string stopLocation = string.Empty;
+                        try
+                        {
+                            var dest = dbService.GetDestinationAsync().GetAwaiter().GetResult();
+                            stopLocation = !string.IsNullOrEmpty(dest.Address)
+                                ? dest.Address
+                                : $"({dest.Latitude:F4}, {dest.Longitude:F4})";
+                        }
+                        catch
+                        {
+                            stopLocation = $"({destinationLat:F4}, {destinationLng:F4})";
+                        }
+
+                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
+                        routeDetailsTextBox.AppendText($"{stopNumber}. {stopName}\n");
+                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
+                        routeDetailsTextBox.AppendText($"   Location: {stopLocation}\n");
+                    }
+
+                    routeDetailsTextBox.AppendText($"   Distance: {stop.DistanceFromPrevious:F2} km\n");
+                    routeDetailsTextBox.AppendText($"   Time: {stop.TimeFromPrevious:F2} min\n");
+                    routeDetailsTextBox.AppendText($"   Cumulative: {stop.CumulativeDistance:F2} km, {stop.CumulativeTime:F2} min\n\n");
+                    stopNumber++;
+                }
+
+                routeDetailsTextBox.AppendText("--------------------------------\n\n");
+            }
+        }
 
         #endregion
 
@@ -1450,8 +1688,6 @@ namespace claudpro
             MessageBox.Show("Passenger edit functionality would be implemented here.",
                 "Not Implemented", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-
-
 
         private void AdminForm_Load(object sender, EventArgs e)
         {
@@ -1472,149 +1708,5 @@ namespace claudpro
         }
 
         #endregion
-    }
-
-    /// <summary>
-    /// Form for editing user information
-    /// </summary>
-    public class UserEditForm : Form
-    {
-        private readonly DatabaseService dbService;
-        private readonly int userId;
-        private TextBox nameTextBox;
-        private TextBox emailTextBox;
-        private TextBox phoneTextBox;
-        private ComboBox userTypeComboBox;
-        private Button saveButton;
-        private Button cancelButton;
-
-
-        public UserEditForm(DatabaseService dbService, int userId, string username, string userType, string name, string email, string phone)
-        {
-            this.dbService = dbService;
-            this.userId = userId;
-
-            InitializeComponent();
-            SetupUI(username, userType, name, email, phone);
-        }
-
-        private void InitializeComponent()
-        {
-            this.SuspendLayout();
-
-            this.Text = "Edit User";
-            this.Size = new Size(400, 300);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.StartPosition = FormStartPosition.CenterParent;
-
-            this.ResumeLayout(false);
-        }
-
-        private void SetupUI(string username, string userType, string name, string email, string phone)
-        {
-            int y = 20;
-            int labelWidth = 120;
-            int inputWidth = 230;
-            int spacing = 30;
-
-            // Username (read-only)
-            Controls.Add(ControlExtensions.CreateLabel("Username:", new Point(20, y), new Size(labelWidth, 20)));
-            var usernameTextBox = ControlExtensions.CreateTextBox(new Point(140, y), new Size(inputWidth, 20), username, false, true);
-            Controls.Add(usernameTextBox);
-            y += spacing;
-
-            // User Type
-            Controls.Add(ControlExtensions.CreateLabel("User Type:", new Point(20, y), new Size(labelWidth, 20)));
-            userTypeComboBox = ControlExtensions.CreateComboBox(
-                new Point(140, y),
-                new Size(inputWidth, 20),
-                new string[] { "Admin", "Driver", "Passenger" }
-            );
-            userTypeComboBox.SelectedItem = userType;
-            Controls.Add(userTypeComboBox);
-            y += spacing;
-
-            // Name
-            Controls.Add(ControlExtensions.CreateLabel("Name:", new Point(20, y), new Size(labelWidth, 20)));
-            nameTextBox = ControlExtensions.CreateTextBox(new Point(140, y), new Size(inputWidth, 20), name);
-            Controls.Add(nameTextBox);
-            y += spacing;
-
-            // Email
-            Controls.Add(ControlExtensions.CreateLabel("Email:", new Point(20, y), new Size(labelWidth, 20)));
-            emailTextBox = ControlExtensions.CreateTextBox(new Point(140, y), new Size(inputWidth, 20), email);
-            Controls.Add(emailTextBox);
-            y += spacing;
-
-            // Phone
-            Controls.Add(ControlExtensions.CreateLabel("Phone:", new Point(20, y), new Size(labelWidth, 20)));
-            phoneTextBox = ControlExtensions.CreateTextBox(new Point(140, y), new Size(inputWidth, 20), phone);
-            Controls.Add(phoneTextBox);
-            y += spacing + 10;
-
-            // Buttons
-            saveButton = ControlExtensions.CreateButton(
-                "Save Changes",
-                new Point(140, y),
-                new Size(110, 30),
-                async (s, e) => await SaveChangesAsync()
-            );
-            Controls.Add(saveButton);
-
-            cancelButton = ControlExtensions.CreateButton(
-                "Cancel",
-                new Point(260, y),
-                new Size(110, 30),
-                (s, e) => this.DialogResult = DialogResult.Cancel
-            );
-            Controls.Add(cancelButton);
-
-            // Set enter key to trigger save
-            AcceptButton = saveButton;
-        }
-
-        private async Task SaveChangesAsync()
-        {
-            if (string.IsNullOrWhiteSpace(nameTextBox.Text))
-            {
-                MessageBox.Show("Name cannot be empty.", "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            try
-            {
-                saveButton.Enabled = false;
-
-                // Update user in database
-                bool success = await dbService.UpdateUserProfileAsync(
-                    userId,
-                    userTypeComboBox.SelectedItem.ToString(),
-                    nameTextBox.Text,
-                    emailTextBox.Text,
-                    phoneTextBox.Text
-                );
-
-                if (success)
-                {
-                    DialogResult = DialogResult.OK;
-                    MessageBox.Show("User updated successfully.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    Close();
-                }
-                else
-                {
-                    MessageBox.Show("Failed to update user. The user may not exist.", "Update Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error updating user: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                saveButton.Enabled = true;
-            }
-        }
     }
 }

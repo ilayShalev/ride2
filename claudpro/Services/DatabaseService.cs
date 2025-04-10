@@ -1974,6 +1974,63 @@ namespace claudpro.Services
                 return Convert.ToBase64String(hash);
             }
         }
+        // Add these methods to the DatabaseService class
+
+        /// <summary>
+        /// Saves a general setting to the database
+        /// </summary>
+        public async Task<bool> SaveSettingAsync(string settingName, string settingValue)
+        {
+            // Ensure Settings table exists
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            CREATE TABLE IF NOT EXISTS Settings (
+                SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
+                SettingName TEXT NOT NULL UNIQUE,
+                SettingValue TEXT NOT NULL
+            )";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // Save the setting
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = @"
+            INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
+            VALUES (@SettingName, @SettingValue)";
+                cmd.Parameters.AddWithValue("@SettingName", settingName);
+                cmd.Parameters.AddWithValue("@SettingValue", settingValue);
+
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+                return rowsAffected > 0;
+            }
+        }
+
+        /// <summary>
+        /// Gets a general setting from the database
+        /// </summary>
+        public async Task<string> GetSettingAsync(string settingName, string defaultValue = "")
+        {
+            // Check if the settings table exists
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Settings'";
+                var result = await cmd.ExecuteScalarAsync();
+                if (result == null)
+                    return defaultValue; // Return default value if table doesn't exist
+            }
+
+            // Get the setting
+            using (var cmd = new SQLiteCommand(connection))
+            {
+                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = @SettingName";
+                cmd.Parameters.AddWithValue("@SettingName", settingName);
+
+                var result = await cmd.ExecuteScalarAsync();
+                return result != null ? result.ToString() : defaultValue;
+            }
+        }
 
         #endregion
 

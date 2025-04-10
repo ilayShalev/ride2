@@ -16,6 +16,8 @@ namespace RideMatchScheduler
         private Timer schedulerTimer;
         private DatabaseService dbService;
         private MapService mapService;
+        private RoutingService routingService;
+
         private string logFilePath;
         private bool isRunningTask = false;
 
@@ -49,6 +51,21 @@ namespace RideMatchScheduler
             {
                 dbService = new DatabaseService(dbPath);
                 mapService = new MapService(apiKey);
+
+                // Initialize routing service with default destination
+                try
+                {
+                    // Initialize routing service with default destination
+                    var defaultDest = dbService.GetDestinationAsync().GetAwaiter().GetResult();
+                    routingService = new RoutingService(mapService, defaultDest.Latitude, defaultDest.Longitude);
+                    Log($"Routing service initialized with destination: {defaultDest.Name}");
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failed to initialize routing service: {ex.Message}");
+                    // Initialize with default values just to avoid null references
+                    routingService = new RoutingService(mapService, 0, 0);
+                }
             }
             catch (Exception ex)
             {
@@ -59,7 +76,6 @@ namespace RideMatchScheduler
             // Set service name
             ServiceName = "RideMatchSchedulerService";
         }
-
         private void InitializeComponent()
         {
             // Service component initialization
@@ -243,11 +259,43 @@ namespace RideMatchScheduler
 
                     if (solution != null)
                     {
-                        // Use Google API to calculate accurate route details including arrival times
-                        await routingService.GetGoogleRoutesAsync(null, solution);
+                        // After running the algorithm, apply routes based on settings
+                        try
+                        {
+                            // Check if Google Routes API should be used
+                            string useGoogleApi = await dbService.GetSettingAsync("UseGoogleRoutesAPI", "1");
+                            bool shouldUseGoogleApi = useGoogleApi == "1";
 
-                        // Calculate backward from target arrival time to determine pickup times
-                        await CalculatePickupTimesBasedOnTargetArrival(solution, destination.TargetTime, routingService);
+                            // Always calculate estimated routes first as a fallback
+                            routingService.CalculateEstimatedRouteDetails(solution);
+
+                            if (shouldUseGoogleApi)
+                            {
+                                try
+                                {
+                                    // Try to get routes from Google API
+                                    Log("Fetching routes from Google Maps API...");
+                                    await routingService.GetGoogleRoutesAsync(null, solution);
+                                    Log("Successfully retrieved routes from Google Maps API");
+                                }
+                                catch (Exception ex)
+                                {
+                                    // If Google API fails, we already have the estimated routes calculated
+                                    Log($"Google API request failed: {ex.Message}. Using estimated routes instead.");
+                                }
+                            }
+                            else
+                            {
+                                Log("Using estimated routes (Google API disabled in settings)");
+                            }
+
+                            // Calculate backward from target arrival time to determine pickup times
+                            await CalculatePickupTimesBasedOnTargetArrival(solution, destination.TargetTime, routingService);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"Error calculating routes: {ex.Message}");
+                        }
 
                         // Save the solution to database for tomorrow's date
                         string tomorrowDate = DateTime.Now.AddDays(1).ToString("yyyy-MM-dd");
@@ -316,7 +364,6 @@ namespace RideMatchScheduler
                 throw; // Re-throw to show error to the user
             }
         }
-
         // New method to calculate pickup times based on desired arrival time at destination
         private async Task CalculatePickupTimesBasedOnTargetArrival(Solution solution, string targetTimeString, RoutingService routingService)
         {
