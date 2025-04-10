@@ -8,6 +8,7 @@ using System.Data.SQLite;
 using claudpro.Models;
 using claudpro.Services;
 using claudpro.UI;
+using GMap.NET.WindowsForms;
 
 namespace claudpro
 {
@@ -20,7 +21,7 @@ namespace claudpro
 
         private TabControl tabControl;
         private TabPage usersTab;
-        private TabPage vehiclesTab; // Changed from driversTab to match usage
+        private TabPage driverTab; // Changed from driversTab to match usage
         private TabPage passengersTab;
         private TabPage routesTab;
         private TabPage destinationTab;
@@ -89,7 +90,7 @@ namespace claudpro
 
             // Create tabs
             usersTab = new TabPage("Users");
-            vehiclesTab = new TabPage("Vehicles"); // Changed from driversTab to match usage
+            driverTab = new TabPage("Drivers"); // Changed from driversTab to match usage
             passengersTab = new TabPage("Passengers");
             routesTab = new TabPage("Routes");
             destinationTab = new TabPage("Destination");
@@ -97,7 +98,7 @@ namespace claudpro
 
             // Add tabs to tab control
             tabControl.TabPages.Add(usersTab);
-            tabControl.TabPages.Add(vehiclesTab);
+            tabControl.TabPages.Add(driverTab);
             tabControl.TabPages.Add(passengersTab);
             tabControl.TabPages.Add(routesTab);
             tabControl.TabPages.Add(destinationTab);
@@ -105,7 +106,7 @@ namespace claudpro
 
             // Setup each tab
             SetupUsersTab();
-            SetupVehiclesTab();
+            SetupDriverTab();
             SetupPassengersTab();
             SetupRoutesTab();
             SetupDestinationTab();
@@ -257,7 +258,7 @@ namespace claudpro
             usersTab.Controls.Add(deleteUserButton);
         }
 
-        private void SetupVehiclesTab()
+        private void SetupDriverTab()
         {
             // Initialize driversListView
             driversListView = new ListView
@@ -278,7 +279,7 @@ namespace claudpro
             driversListView.Columns.Add("User ID", 80);
 
             // Add the ListView to the tab
-            vehiclesTab.Controls.Add(driversListView);
+            driverTab.Controls.Add(driversListView);
 
             // Change button text
             var refreshButton = ControlExtensions.CreateButton(
@@ -290,7 +291,7 @@ namespace claudpro
                     await DisplayDriversAsync(driversListView);
                 }
             );
-            vehiclesTab.Controls.Add(refreshButton);
+            driverTab.Controls.Add(refreshButton);
 
             var addDriverButton = ControlExtensions.CreateButton(
                 "Add Driver",
@@ -298,7 +299,7 @@ namespace claudpro
                 new Size(120, 30),
                 (s, e) => ShowVehicleEditForm(0)
             );
-            vehiclesTab.Controls.Add(addDriverButton);
+            driverTab.Controls.Add(addDriverButton);
 
             // Edit Vehicle button
             var editVehicleButton = ControlExtensions.CreateButton(
@@ -317,7 +318,7 @@ namespace claudpro
                     ShowVehicleEditForm(vehicleId);
                 }
             );
-            vehiclesTab.Controls.Add(editVehicleButton);
+            driverTab.Controls.Add(editVehicleButton);
 
             // Delete Vehicle button
             var deleteVehicleButton = ControlExtensions.CreateButton(
@@ -361,7 +362,7 @@ namespace claudpro
                     }
                 }
             );
-            vehiclesTab.Controls.Add(deleteVehicleButton);
+            driverTab.Controls.Add(deleteVehicleButton);
 
             // Map for vehicle locations
             var gMapControl = new GMap.NET.WindowsForms.GMapControl
@@ -373,12 +374,12 @@ namespace claudpro
                 Zoom = 12,
                 DragButton = MouseButtons.Left
             };
-            vehiclesTab.Controls.Add(gMapControl);
+            driverTab.Controls.Add(gMapControl);
             mapService.InitializeGoogleMaps(gMapControl);
 
             // Display vehicles on map when tab is shown
             tabControl.SelectedIndexChanged += async (s, e) => {
-                if (tabControl.SelectedTab == vehiclesTab)
+                if (tabControl.SelectedTab == driverTab)
                 {
                     await LoadVehiclesAsync();
                     await DisplayDriversAsync(driversListView);
@@ -664,6 +665,15 @@ namespace claudpro
             var timeTextBox = ControlExtensions.CreateTextBox(
                 new Point(180, 60), new Size(150, 25), "08:00:00");
             panel.Controls.Add(timeTextBox);
+
+            // update save Target arrival time
+            var updateTimeButton = ControlExtensions.CreateButton(
+                "Update Arrival Time",
+                new Point(340, 60),
+                new Size(150, 25),
+                async (s, e) => await UpdateTargetTimeAsync(timeTextBox.Text)
+            );
+            panel.Controls.Add(updateTimeButton);
 
             // Map for destination selection
             var gMapControl = new GMap.NET.WindowsForms.GMapControl
@@ -1491,6 +1501,16 @@ namespace claudpro
                 if (gMapControl != null)
                 {
                     routingService.DisplaySolutionOnMap(gMapControl, currentSolution);
+                    var passengersOverlay = new GMapOverlay("passengers");
+                    foreach (var vehicle in currentSolution.Vehicles)
+                    {
+                        foreach (var passenger in vehicle.AssignedPassengers)
+                        {
+                            var marker = MapOverlays.CreatePassengerMarker(passenger);
+                            passengersOverlay.Markers.Add(marker);
+                        }
+                    }
+                    gMapControl.Overlays.Add(passengersOverlay);
                 }
 
                 // Display routes in list
@@ -1675,6 +1695,45 @@ namespace claudpro
 
         #region Helper Methods
 
+        async Task UpdateTargetTimeAsync(string timeString)
+        {
+            try
+            {
+                // Validate time format (HH:MM:SS)
+                if (!TimeSpan.TryParse(timeString, out TimeSpan _))
+                {
+                    MessageBox.Show("Please enter a valid time in format HH:MM:SS",
+                        "Invalid Time Format", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // Get current destination values
+                var dest = await dbService.GetDestinationAsync();
+
+                // Update just the target time
+                bool success = await dbService.UpdateDestinationAsync(
+                    dest.Name, dest.Latitude, dest.Longitude, timeString, dest.Address);
+
+                if (success)
+                {
+                    MessageBox.Show("Target arrival time updated successfully.",
+                        "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                    // Update stored value
+                    destinationTargetTime = timeString;
+                }
+                else
+                {
+                    MessageBox.Show("Failed to update target arrival time.",
+                        "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error updating target time: {ex.Message}",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
         private void ShowVehicleEditForm(int vehicleId)
         {
             // This would be implemented to show a form for editing vehicle details

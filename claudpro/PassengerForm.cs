@@ -494,24 +494,17 @@ namespace claudpro
             gMapControl.Overlays.Clear();
 
             var passengersOverlay = new GMapOverlay("passengers");
-            var routesOverlay = new GMapOverlay("routes");
 
             // Create passenger marker
             var marker = MapOverlays.CreatePassengerMarker(passenger);
             passengersOverlay.Markers.Add(marker);
 
-            gMapControl.Overlays.Add(routesOverlay);
             gMapControl.Overlays.Add(passengersOverlay);
 
-            // Create destination overlay and vehicle overlay if there's an assigned vehicle
+            // Create destination marker if there's an assigned vehicle
             if (assignedVehicle != null)
             {
-                var vehiclesOverlay = new GMapOverlay("vehicles");
-                var vehicleMarker = MapOverlays.CreateVehicleMarker(assignedVehicle);
-                vehiclesOverlay.Markers.Add(vehicleMarker);
-                gMapControl.Overlays.Add(vehiclesOverlay);
-
-                // Get destination and create route
+                // Get destination
                 Task.Run(async () => {
                     var destination = await dbService.GetDestinationAsync();
                     this.Invoke(new Action(() => {
@@ -523,27 +516,11 @@ namespace claudpro
                             destinationOverlay.Markers.Add(destinationMarker);
                             gMapControl.Overlays.Add(destinationOverlay);
 
-                            // Create route points
-                            var routePoints = new List<PointLatLng>();
-
-                            // Add vehicle starting point
-                            routePoints.Add(new PointLatLng(assignedVehicle.StartLatitude, assignedVehicle.StartLongitude));
-
-                            // Add passenger location
-                            routePoints.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
-
-                            // Add destination
-                            routePoints.Add(new PointLatLng(destination.Latitude, destination.Longitude));
-
-                            // Create route
-                            var route = MapOverlays.CreateRoute(routePoints, "PassengerRoute", Color.Blue);
-                            routesOverlay.Routes.Add(route);
-
                             gMapControl.Refresh();
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Error creating route: {ex.Message}");
+                            Console.WriteLine($"Error creating destination marker: {ex.Message}");
                         }
                     }));
                 });

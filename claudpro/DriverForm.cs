@@ -254,7 +254,7 @@ namespace claudpro
                 // Add the "Set Location on Map" button
                 var setLocationButton = ControlExtensions.CreateButton(
                     "Set Location on Map",
-                    new Point(20, 450),
+                    new Point(20, 445),
                     new Size(150, 30),
                     (s, e) => EnableMapLocationSelection()
                 );
@@ -263,13 +263,13 @@ namespace claudpro
                 // Add the "Or Search Address:" label
                 leftPanel.Controls.Add(ControlExtensions.CreateLabel(
                     "Or Search Address:",
-                    new Point(20, 490),
+                    new Point(20, 472),
                     new Size(150, 20)
                 ));
 
                 // Add address textbox
                 var addressTextBox = ControlExtensions.CreateTextBox(
-                    new Point(20, 515),
+                    new Point(20, 500),
                     new Size(220, 25)
                 );
                 leftPanel.Controls.Add(addressTextBox);
@@ -277,7 +277,7 @@ namespace claudpro
                 // Add search button
                 var searchButton = ControlExtensions.CreateButton(
                     "Search",
-                    new Point(250, 515),
+                    new Point(250, 500),
                     new Size(80, 25),
                     async (s, e) => await SearchAddressAsync(addressTextBox.Text)
                 );
@@ -353,94 +353,94 @@ namespace claudpro
             }
         }
 
-        private async Task LoadDriverDataAsync()
+private async Task LoadDriverDataAsync()
+{
+    if (refreshButton == null || routeDetailsTextBox == null) return;
+
+    refreshButton.Enabled = false;
+    routeDetailsTextBox.Clear();
+    routeDetailsTextBox.AppendText("Loading route data...\n");
+
+    try
+    {
+        // Load vehicle and route data
+        vehicle = await dbService.GetVehicleByUserIdAsync(userId);
+
+        if (vehicle == null)
         {
-            if (refreshButton == null || routeDetailsTextBox == null) return;
-
-            refreshButton.Enabled = false;
             routeDetailsTextBox.Clear();
-            routeDetailsTextBox.AppendText("Loading route data...\n");
-
-            try
+            routeDetailsTextBox.AppendText("No vehicle is assigned to you.\n");
+            routeDetailsTextBox.AppendText("Please set your vehicle information.\n");
+            
+            // Initialize with default values
+            vehicle = new Vehicle
             {
-                // Load vehicle and route data
-                vehicle = await dbService.GetVehicleByUserIdAsync(userId);
+                UserId = userId,
+                Capacity = 4,
+                IsAvailableTomorrow = true,
+                DriverName = username
+            };
+            
+            return;
+        }
 
-                if (vehicle == null)
-                {
-                    routeDetailsTextBox.Clear();
-                    routeDetailsTextBox.AppendText("No vehicle is assigned to you.\n");
-                    routeDetailsTextBox.AppendText("Please set your vehicle information.\n");
+        // Update UI controls to reflect vehicle data
+        availabilityCheckBox.Checked = vehicle.IsAvailableTomorrow;
+        capacityNumericUpDown.Value = vehicle.Capacity;
 
-                    // Initialize with default values
-                    vehicle = new Vehicle
-                    {
-                        UserId = userId,
-                        Capacity = 4,
-                        IsAvailableTomorrow = true,
-                        DriverName = username
-                    };
+        // Get today's date in the format used by the database
+        string today = DateTime.Now.ToString("yyyy-MM-dd");
 
-                    return;
-                }
-
-                // Update UI controls to reflect vehicle data
-                availabilityCheckBox.Checked = vehicle.IsAvailableTomorrow;
-                capacityNumericUpDown.Value = vehicle.Capacity;
-
-                // Get today's date in the format used by the database
-                string today = DateTime.Now.ToString("yyyy-MM-dd");
-
-                // Get route data
-                var routeData = await dbService.GetDriverRouteAsync(userId, today);
-
-                // Debug output - remove in production
-                Console.WriteLine($"Retrieved vehicle - Departure time: {routeData.Vehicle?.DepartureTime ?? "null"}");
-
-                if (routeData.Vehicle != null)
-                {
-                    vehicle = routeData.Vehicle;
-                }
-
-                assignedPassengers = routeData.Passengers ?? new List<Passenger>();
-
-                // Debug output - remove in production
-                if (assignedPassengers != null)
-                {
-                    foreach (var p in assignedPassengers)
-                    {
-                        Console.WriteLine($"Passenger {p.Name} - Pickup time: {p.EstimatedPickupTime ?? "null"}");
-                    }
-                }
-
-                pickupTime = routeData.PickupTime;
-
-                // Clear map and display the route
-                ShowRouteOnMap();
-
-                // Update route details text
-                UpdateRouteDetailsText(pickupTime);
-
-                // Update the address search control with current address
-                if (addressSearchControl != null && !string.IsNullOrEmpty(vehicle.StartAddress))
-                {
-                    addressSearchControl.Address = vehicle.StartAddress;
-                }
-            }
-            catch (Exception ex)
+        // Get route data
+        var routeData = await dbService.GetDriverRouteAsync(userId, today);
+        
+        // Debug output - remove in production
+        Console.WriteLine($"Retrieved vehicle - Departure time: {routeData.Vehicle?.DepartureTime ?? "null"}");
+        
+        if (routeData.Vehicle != null)
+        {
+            vehicle = routeData.Vehicle;
+        }
+        
+        assignedPassengers = routeData.Passengers ?? new List<Passenger>();
+        
+        // Debug output - remove in production
+        if (assignedPassengers != null)
+        {
+            foreach (var p in assignedPassengers)
             {
-                routeDetailsTextBox.Clear();
-                routeDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
+                Console.WriteLine($"Passenger {p.Name} - Pickup time: {p.EstimatedPickupTime ?? "null"}");
+            }
+        }
+        
+        pickupTime = routeData.PickupTime;
 
-                // Debug output - remove in production
-                Console.WriteLine($"Error loading driver data: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
-            }
-            finally
-            {
-                refreshButton.Enabled = true;
-            }
-        }        // Update the DisplayPassengerOnMap method in DriverForm.cs to show routes
+        // Clear map and display the route
+        ShowRouteOnMap();
+
+        // Update route details text
+        UpdateRouteDetailsText(pickupTime);
+
+        // Update the address search control with current address
+        if (addressSearchControl != null && !string.IsNullOrEmpty(vehicle.StartAddress))
+        {
+            addressSearchControl.Address = vehicle.StartAddress;
+        }
+    }
+    catch (Exception ex)
+    {
+        routeDetailsTextBox.Clear();
+        routeDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
+        
+        // Debug output - remove in production
+        Console.WriteLine($"Error loading driver data: {ex.Message}");
+        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+    }
+    finally
+    {
+        refreshButton.Enabled = true;
+    }
+}        // Update the DisplayPassengerOnMap method in DriverForm.cs to show routes
         private void DisplayVehicleAndRouteOnMap()
         {
             if (vehicle == null) return;
