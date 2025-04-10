@@ -371,7 +371,7 @@ namespace claudpro
                     routeDetailsTextBox.Clear();
                     routeDetailsTextBox.AppendText("No vehicle is assigned to you.\n");
                     routeDetailsTextBox.AppendText("Please set your vehicle information.\n");
-                    
+
                     // Initialize with default values
                     vehicle = new Vehicle
                     {
@@ -380,7 +380,7 @@ namespace claudpro
                         IsAvailableTomorrow = true,
                         DriverName = username
                     };
-                    
+
                     return;
                 }
 
@@ -393,15 +393,33 @@ namespace claudpro
 
                 // Get route data
                 var routeData = await dbService.GetDriverRouteAsync(userId, today);
-                vehicle = routeData.Vehicle ?? vehicle;
+
+                // Debug output - remove in production
+                Console.WriteLine($"Retrieved vehicle - Departure time: {routeData.Vehicle?.DepartureTime ?? "null"}");
+
+                if (routeData.Vehicle != null)
+                {
+                    vehicle = routeData.Vehicle;
+                }
+
                 assignedPassengers = routeData.Passengers ?? new List<Passenger>();
+
+                // Debug output - remove in production
+                if (assignedPassengers != null)
+                {
+                    foreach (var p in assignedPassengers)
+                    {
+                        Console.WriteLine($"Passenger {p.Name} - Pickup time: {p.EstimatedPickupTime ?? "null"}");
+                    }
+                }
+
                 pickupTime = routeData.PickupTime;
 
                 // Clear map and display the route
                 ShowRouteOnMap();
 
                 // Update route details text
-                UpdateRouteDetailsText(routeData.PickupTime);
+                UpdateRouteDetailsText(pickupTime);
 
                 // Update the address search control with current address
                 if (addressSearchControl != null && !string.IsNullOrEmpty(vehicle.StartAddress))
@@ -413,14 +431,16 @@ namespace claudpro
             {
                 routeDetailsTextBox.Clear();
                 routeDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
+
+                // Debug output - remove in production
+                Console.WriteLine($"Error loading driver data: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
             }
             finally
             {
                 refreshButton.Enabled = true;
             }
-        }
-
-        // Update the DisplayPassengerOnMap method in DriverForm.cs to show routes
+        }        // Update the DisplayPassengerOnMap method in DriverForm.cs to show routes
         private void DisplayVehicleAndRouteOnMap()
         {
             if (vehicle == null) return;
@@ -518,20 +538,66 @@ namespace claudpro
                                 // Add destination to route points
                                 routePoints.Add(new PointLatLng(destination.Latitude, destination.Longitude));
 
-                                // Create route with the points we've collected
+                                // Try to get the Google Directions route if there are enough points
                                 if (routePoints.Count >= 2)
                                 {
-                                    var route = MapOverlays.CreateRoute(routePoints, "DriverRoute", Color.Blue);
-                                    routesOverlay.Routes.Add(route);
+                                    // Try to get actual route from Google
+                                    Task.Run(async () => {
+                                        try
+                                        {
+                                            var googlePoints = await mapService.GetGoogleDirectionsAsync(routePoints);
+
+                                            this.Invoke(new Action(() => {
+                                                if (googlePoints != null && googlePoints.Count > 0)
+                                                {
+                                                    // Create route with the Google directions
+                                                    var route = MapOverlays.CreateRoute(googlePoints, "DriverRoute", Color.Blue);
+                                                    routesOverlay.Routes.Add(route);
+                                                }
+                                                else
+                                                {
+                                                    // Fallback to straight line if Google directions fail
+                                                    var route = MapOverlays.CreateRoute(routePoints, "DriverRoute", Color.Blue);
+                                                    routesOverlay.Routes.Add(route);
+                                                }
+
+                                                // Add overlays to map
+                                                gMapControl.Overlays.Add(routesOverlay);
+                                                gMapControl.Overlays.Add(vehiclesOverlay);
+                                                gMapControl.Overlays.Add(passengersOverlay);
+                                                gMapControl.Overlays.Add(destinationOverlay);
+
+                                                gMapControl.Refresh();
+                                            }));
+                                        }
+                                        catch
+                                        {
+                                            // Fallback to straight line if Google directions throw an error
+                                            this.Invoke(new Action(() => {
+                                                var route = MapOverlays.CreateRoute(routePoints, "DriverRoute", Color.Blue);
+                                                routesOverlay.Routes.Add(route);
+
+                                                // Add overlays to map
+                                                gMapControl.Overlays.Add(routesOverlay);
+                                                gMapControl.Overlays.Add(vehiclesOverlay);
+                                                gMapControl.Overlays.Add(passengersOverlay);
+                                                gMapControl.Overlays.Add(destinationOverlay);
+
+                                                gMapControl.Refresh();
+                                            }));
+                                        }
+                                    });
                                 }
+                                else
+                                {
+                                    // Add overlays to map
+                                    gMapControl.Overlays.Add(routesOverlay);
+                                    gMapControl.Overlays.Add(vehiclesOverlay);
+                                    gMapControl.Overlays.Add(passengersOverlay);
+                                    gMapControl.Overlays.Add(destinationOverlay);
 
-                                // Add overlays to map
-                                gMapControl.Overlays.Add(routesOverlay);
-                                gMapControl.Overlays.Add(vehiclesOverlay);
-                                gMapControl.Overlays.Add(passengersOverlay);
-                                gMapControl.Overlays.Add(destinationOverlay);
-
-                                gMapControl.Refresh();
+                                    gMapControl.Refresh();
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -551,7 +617,6 @@ namespace claudpro
                     "Map Display Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
-
         // Updated UpdateRouteDetailsText to show departure time
         private void UpdateRouteDetailsText(DateTime? pickupTime)
         {
@@ -577,29 +642,20 @@ namespace claudpro
             }
             else if (!string.IsNullOrEmpty(vehicle.StartAddress))
             {
-                routeDetailsTextBox.AppendText($"Starting Location: {vehicle.StartAddress}\n\n");
+                routeDetailsTextBox.AppendText($"Starting Location: {vehicle.StartAddress}\n");
             }
             else
             {
-                routeDetailsTextBox.AppendText($"Starting Location: ({vehicle.StartLatitude:F6}, {vehicle.StartLongitude:F6})\n\n");
+                routeDetailsTextBox.AppendText($"Starting Location: ({vehicle.StartLatitude:F6}, {vehicle.StartLongitude:F6})\n");
             }
 
             if (assignedPassengers != null && assignedPassengers.Count > 0)
             {
-                // Display driver departure time if available
+                // Display departure time with bold formatting - this is key
                 if (!string.IsNullOrEmpty(vehicle.DepartureTime))
                 {
                     routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                    routeDetailsTextBox.AppendText($"Your Departure Time: {vehicle.DepartureTime}\n\n");
-                    routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
-                }
-                else if (pickupTime.HasValue)
-                {
-                    // If we only have pickupTime for first passenger, estimate departure
-                    // by subtracting 10 minutes (rough estimation)
-                    var estimatedDeparture = pickupTime.Value.AddMinutes(-10);
-                    routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
-                    routeDetailsTextBox.AppendText($"Estimated Departure: {estimatedDeparture.ToString("HH:mm")}\n\n");
+                    routeDetailsTextBox.AppendText($"\nDeparture Time: {vehicle.DepartureTime}\n\n");
                     routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                 }
 
@@ -619,26 +675,29 @@ namespace claudpro
                     else
                         routeDetailsTextBox.AppendText($"   Pick-up: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n");
 
-                    // Show pickup time if available
+                    // Display pickup time with bold formatting - this is key
                     if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
                     {
+                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                         routeDetailsTextBox.AppendText($"   Pick-up Time: {passenger.EstimatedPickupTime}\n");
+                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                     }
                     else if (i == 0 && pickupTime.HasValue)
                     {
                         // For first passenger, use the pickupTime if no estimated time
+                        routeDetailsTextBox.SelectionFont = new Font(routeDetailsTextBox.Font, FontStyle.Bold);
                         routeDetailsTextBox.AppendText($"   Pick-up Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                        routeDetailsTextBox.SelectionFont = routeDetailsTextBox.Font;
                     }
-                }
 
-                routeDetailsTextBox.AppendText("\n");
+                    routeDetailsTextBox.AppendText("\n");
+                }
             }
             else
             {
-                routeDetailsTextBox.AppendText("No passengers assigned for today's route.\n");
+                routeDetailsTextBox.AppendText("\nNo passengers assigned for today's route.\n");
             }
         }
-
         private async Task UpdateAvailabilityAsync()
         {
             if (vehicle == null || availabilityCheckBox == null)

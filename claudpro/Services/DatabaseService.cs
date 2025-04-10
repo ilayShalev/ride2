@@ -1396,6 +1396,9 @@ namespace claudpro.Services
         /// <summary>
         /// Gets driver's route and assigned passengers for a specific date
         /// </summary>
+        /// <summary>
+        /// Gets driver's route and assigned passengers for a specific date
+        /// </summary>
         public async Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)> GetDriverRouteAsync(int userId, string date)
         {
             // Get driver's vehicle first
@@ -1420,14 +1423,14 @@ namespace claudpro.Services
             }
 
             // Get route details for this vehicle
-            int routeDetailId;
+            int routeDetailId = 0;
             string departureTime = null;
             using (var cmd = new SQLiteCommand(connection))
             {
                 cmd.CommandText = @"
-                    SELECT RouteDetailID, TotalDistance, TotalTime, DepartureTime
-                    FROM RouteDetails 
-                    WHERE RouteID = @RouteID AND VehicleID = @VehicleID";
+            SELECT RouteDetailID, TotalDistance, TotalTime, DepartureTime
+            FROM RouteDetails 
+            WHERE RouteID = @RouteID AND VehicleID = @VehicleID";
                 cmd.Parameters.AddWithValue("@RouteID", routeId);
                 cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
 
@@ -1455,18 +1458,20 @@ namespace claudpro.Services
             using (var cmd = new SQLiteCommand(connection))
             {
                 cmd.CommandText = @"
-                    SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
-                           p.Name, p.Latitude, p.Longitude, p.Address
-                    FROM PassengerAssignments pa
-                    JOIN Passengers p ON pa.PassengerID = p.PassengerID
-                    WHERE pa.RouteDetailID = @RouteDetailID
-                    ORDER BY pa.StopOrder";
+            SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
+                   p.Name, p.Latitude, p.Longitude, p.Address
+            FROM PassengerAssignments pa
+            JOIN Passengers p ON pa.PassengerID = p.PassengerID
+            WHERE pa.RouteDetailID = @RouteDetailID
+            ORDER BY pa.StopOrder";
                 cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
 
                 using (var reader = await cmd.ExecuteReaderAsync())
                 {
                     while (await reader.ReadAsync())
                     {
+                        string pickupTime = reader.IsDBNull(2) ? null : reader.GetString(2);
+
                         var passenger = new Passenger
                         {
                             Id = reader.GetInt32(0),
@@ -1474,21 +1479,58 @@ namespace claudpro.Services
                             Latitude = reader.GetDouble(4),
                             Longitude = reader.GetDouble(5),
                             Address = reader.IsDBNull(6) ? null : reader.GetString(6),
-                            EstimatedPickupTime = reader.IsDBNull(2) ? null : reader.GetString(2)
+                            EstimatedPickupTime = pickupTime
                         };
 
                         passengers.Add(passenger);
 
-                        if (passengers.Count == 1 && !reader.IsDBNull(2))
+                        if (passengers.Count == 1 && !string.IsNullOrEmpty(pickupTime))
                         {
-                            firstPickupTime = DateTime.Parse(reader.GetString(2));
+                            try
+                            {
+                                firstPickupTime = DateTime.Parse(pickupTime);
+                            }
+                            catch
+                            {
+                                // If parsing fails, leave as null
+                            }
                         }
-                        else if (passengers.Count == 1 && string.IsNullOrEmpty(passenger.EstimatedPickupTime) && !string.IsNullOrEmpty(departureTime))
-                        {
-                            // Estimate pickup time based on departure time if not explicitly set
-                            DateTime departure = DateTime.Parse(departureTime);
-                            firstPickupTime = departure.AddMinutes(15); // Assume 15 min to first passenger
-                        }
+                    }
+                }
+            }
+
+            // If no first pickup time was found and we have a departure time, estimate a pickup time
+            if (firstPickupTime == null && !string.IsNullOrEmpty(departureTime) && passengers.Count > 0)
+            {
+                try
+                {
+                    DateTime departure = DateTime.Parse(departureTime);
+                    firstPickupTime = departure.AddMinutes(15); // Estimate 15 min to first passenger
+
+                    // Update the first passenger's estimated pickup time if it's not already set
+                    if (string.IsNullOrEmpty(passengers[0].EstimatedPickupTime))
+                    {
+                        passengers[0].EstimatedPickupTime = firstPickupTime.Value.ToString("HH:mm");
+                    }
+                }
+                catch
+                {
+                    // If parsing fails, leave as null
+                }
+            }
+
+            // Check if we need to get departure time from the Vehicles table as a fallback
+            if (string.IsNullOrEmpty(vehicle.DepartureTime))
+            {
+                using (var cmd = new SQLiteCommand(connection))
+                {
+                    cmd.CommandText = "SELECT DepartureTime FROM Vehicles WHERE VehicleID = @VehicleID";
+                    cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
+
+                    var result = await cmd.ExecuteScalarAsync();
+                    if (result != null && !Convert.IsDBNull(result))
+                    {
+                        vehicle.DepartureTime = result.ToString();
                     }
                 }
             }
@@ -1496,7 +1538,6 @@ namespace claudpro.Services
             vehicle.AssignedPassengers = passengers;
             return (vehicle, passengers, firstPickupTime);
         }
-
         /// <summary>
         /// Gets the solution for a specific date
         /// </summary>
