@@ -388,11 +388,21 @@ private async Task LoadDriverDataAsync()
         availabilityCheckBox.Checked = vehicle.IsAvailableTomorrow;
         capacityNumericUpDown.Value = vehicle.Capacity;
 
+        var destination = await dbService.GetDestinationAsync();
+
         // Get today's date in the format used by the database
-        string today = DateTime.Now.ToString("yyyy-MM-dd");
+        TimeSpan timeToAdd = TimeSpan.Parse(destination.TargetTime);
+        DateTime now = DateTime.Now;
+        DateTime targetTime = new DateTime(now.Year, now.Month, now.Day,
+                                                 timeToAdd.Hours, timeToAdd.Minutes, timeToAdd.Seconds);
+        string queryTime = now.ToString("yyyy-MM-dd");
+        if(targetTime < DateTime.Now)
+        {
+            queryTime = now.AddDays(1).ToString("yyyy-MM-dd");
+        }
 
         // Get route data
-        var routeData = await dbService.GetDriverRouteAsync(userId, today);
+        var routeData = await dbService.GetDriverRouteAsync(userId, queryTime);
         
         // Debug output - remove in production
         Console.WriteLine($"Retrieved vehicle - Departure time: {routeData.Vehicle?.DepartureTime ?? "null"}");

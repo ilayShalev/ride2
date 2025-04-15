@@ -371,7 +371,7 @@ namespace claudpro.Services
             // Calculate score components
             double distanceScore = totalDistance > 0 ? 1000.0 / totalDistance : 0;
             double assignmentScore = assignedCount * 100.0; // High priority for assigning all passengers
-            double vehicleUtilizationScore = usedVehicles * 10.0; // Prefer using fewer vehicles
+            double vehicleUtilizationScore = usedVehicles * -10.0; // Prefer using fewer vehicles
             double overloadPenalty = overloadedVehicles * -200.0; // Severe penalty for overloading
             double timeScore = maxTime > 0 ? 500.0 / maxTime : 0; // Prefer shorter routes
 
@@ -379,7 +379,7 @@ namespace claudpro.Services
             double unassignedPenalty = (passengers.Count - assignedCount) * -1000.0;
 
             // Calculate final score - higher is better
-            double score = distanceScore + assignmentScore - vehicleUtilizationScore +
+            double score = distanceScore + assignmentScore + vehicleUtilizationScore +
                            overloadPenalty + timeScore + unassignedPenalty;
 
             return score;
