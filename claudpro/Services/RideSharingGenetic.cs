@@ -331,7 +331,6 @@ namespace claudpro.Services
                 DriverName = v.DriverName,
                 AssignedPassengers = new List<Passenger>(),
                 TotalDistance = 0,
-                TotalTime = 0
             }).ToList();
         }
 
@@ -341,7 +340,6 @@ namespace claudpro.Services
         private double Evaluate(Solution solution)
         {
             double totalDistance = 0;
-            double maxTime = 0;
             int assignedCount = 0;
             int usedVehicles = 0;
             int overloadedVehicles = 0;
@@ -358,29 +356,27 @@ namespace claudpro.Services
                 }
 
                 // Calculate route metrics
-                var metrics = CalculateRouteMetrics(vehicle);
-                vehicle.TotalDistance = metrics.TotalDistance;
-                vehicle.TotalTime = metrics.TotalTime;
+                CalculateRouteMetrics(vehicle);
+                vehicle.TotalDistance = CalculateRouteMetrics(vehicle);
+
 
                 // Update global metrics
-                totalDistance += metrics.TotalDistance;
-                maxTime = Math.Max(maxTime, metrics.TotalTime);
+                totalDistance += vehicle.TotalDistance;
                 assignedCount += vehicle.AssignedPassengers.Count;
             }
 
             // Calculate score components
-            double distanceScore = totalDistance > 0 ? 1000.0 / totalDistance : 0;
+            double distanceScore = totalDistance > 0 ? 1500.0 / totalDistance : 0;
             double assignmentScore = assignedCount * 100.0; // High priority for assigning all passengers
             double vehicleUtilizationScore = usedVehicles * -10.0; // Prefer using fewer vehicles
             double overloadPenalty = overloadedVehicles * -200.0; // Severe penalty for overloading
-            double timeScore = maxTime > 0 ? 500.0 / maxTime : 0; // Prefer shorter routes
 
             // Unassigned passenger penalty
             double unassignedPenalty = (passengers.Count - assignedCount) * -1000.0;
 
             // Calculate final score - higher is better
             double score = distanceScore + assignmentScore + vehicleUtilizationScore +
-                           overloadPenalty + timeScore + unassignedPenalty;
+                           overloadPenalty  + unassignedPenalty;
 
             return score;
         }
@@ -388,10 +384,10 @@ namespace claudpro.Services
         /// <summary>
         /// Calculates route metrics for a vehicle
         /// </summary>
-        private (double TotalDistance, double TotalTime) CalculateRouteMetrics(Vehicle vehicle)
+        private double  CalculateRouteMetrics(Vehicle vehicle)
         {
             if (vehicle.AssignedPassengers.Count == 0)
-                return (0, 0);
+                return 0;
 
             double totalDistance = 0;
             double currentLat = vehicle.StartLatitude;
@@ -415,10 +411,9 @@ namespace claudpro.Services
                 destinationLat, destinationLng);
             totalDistance += destDistance;
 
-            // Estimate time assuming average speed of 30 km/h
-            double totalTime = (totalDistance / 30.0) * 60; // Convert to minutes
+           
 
-            return (totalDistance, totalTime);
+            return totalDistance;
         }
 
         /// <summary>
@@ -735,7 +730,7 @@ namespace claudpro.Services
             var vehicle = vehiclesWithManyPassengers[random.Next(vehiclesWithManyPassengers.Count)];
 
             // 2-opt local search: try all possible 2-edge swaps and pick the best
-            double bestDistance = CalculateRouteMetrics(vehicle).TotalDistance;
+            double bestDistance = CalculateRouteMetrics(vehicle);
             var bestOrder = new List<Passenger>(vehicle.AssignedPassengers);
 
             // Try a limited number of random swaps (full 2-opt would be O(n²) which is too expensive)
@@ -766,7 +761,7 @@ namespace claudpro.Services
                 vehicle.AssignedPassengers = newOrder;
 
                 // Calculate new route distance
-                double newDistance = CalculateRouteMetrics(vehicle).TotalDistance;
+                double newDistance = CalculateRouteMetrics(vehicle);
 
                 // If it's better, keep this as the best so far
                 if (newDistance < bestDistance)
@@ -800,9 +795,7 @@ namespace claudpro.Services
             {
                 if (vehicle.AssignedPassengers.Count > 0)
                 {
-                    var metrics = CalculateRouteMetrics(vehicle);
-                    vehicle.TotalDistance = metrics.TotalDistance;
-                    vehicle.TotalTime = metrics.TotalTime;
+                    vehicle.TotalDistance = CalculateRouteMetrics(vehicle);
                 }
             }
         }
