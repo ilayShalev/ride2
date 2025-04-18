@@ -32,6 +32,9 @@ namespace claudpro.Services
         private const int TournamentSize = 5;
         private const int MaxGenerationsWithoutImprovement = 20;
 
+        // Capacity tracking
+        private bool hasCapacityIssue = false;
+
         public RideSharingGenetic(List<Passenger> passengers, List<Vehicle> vehicles, int populationSize,
             double destinationLat, double destinationLng, int targetTime)
         {
@@ -51,12 +54,20 @@ namespace claudpro.Services
         /// </summary>
         /// <param name="generations">Maximum number of generations to run</param>
         /// <param name="initialPopulation">Optional initial population</param>
-        /// <returns>The best solution found</returns>
+        /// <returns>The best solution found, or null if no valid solution exists</returns>
         public Solution Solve(int generations, List<Solution> initialPopulation = null)
         {
             // Validate inputs
             if (passengers.Count == 0 || vehicles.Count == 0)
                 return new Solution { Vehicles = new List<Vehicle>() };
+
+            // Check if there's enough total capacity
+            int totalCapacity = vehicles.Sum(v => v.Capacity);
+            if (totalCapacity < passengers.Count)
+            {
+                Console.WriteLine($"Warning: Total vehicle capacity ({totalCapacity}) is less than passenger count ({passengers.Count})");
+                hasCapacityIssue = true;
+            }
 
             // Initialize population
             population = initialPopulation?.Count > 0
@@ -76,7 +87,12 @@ namespace claudpro.Services
 
                 // Check for improvement
                 var currentBest = GetBestSolution();
-                if (currentBest.Score > bestScore)
+
+                // Only update the best solution if it doesn't have capacity issues
+                // or we have no choice because all solutions have capacity issues
+                bool hasBestCapacityIssue = HasCapacityIssue(currentBest);
+
+                if (currentBest.Score > bestScore && (!hasBestCapacityIssue || hasCapacityIssue))
                 {
                     bestSolution = currentBest.Clone();
                     bestScore = currentBest.Score;
@@ -95,10 +111,33 @@ namespace claudpro.Services
                 }
             }
 
-            // Calculate exact distances for best solution
+            // Calculate exact metrics for best solution
             CalculateExactMetrics(bestSolution);
 
+            // Check if final solution has capacity issues
+            if (HasCapacityIssue(bestSolution))
+            {
+                Console.WriteLine("No solution found with adequate capacity. The best solution still exceeds vehicle capacities.");
+                hasCapacityIssue = true;
+            }
+
             return bestSolution;
+        }
+
+        /// <summary>
+        /// Checks if a solution has capacity issues (more passengers than capacity in any vehicle)
+        /// </summary>
+        private bool HasCapacityIssue(Solution solution)
+        {
+            return solution.Vehicles.Any(v => v.AssignedPassengers.Count > v.Capacity);
+        }
+
+        /// <summary>
+        /// Returns whether the final solution has capacity issues
+        /// </summary>
+        public bool HasCapacityIssue()
+        {
+            return hasCapacityIssue;
         }
 
         /// <summary>
@@ -121,6 +160,14 @@ namespace claudpro.Services
                 // Selection
                 var parent1 = TournamentSelection();
                 var parent2 = TournamentSelection();
+
+
+                //make sure the parents are not the same
+                while (parent1 == parent2)
+                {
+                    parent2 = TournamentSelection();
+                }
+
 
                 // Crossover
                 var child = Crossover(parent1, parent2);
@@ -343,6 +390,7 @@ namespace claudpro.Services
             int assignedCount = 0;
             int usedVehicles = 0;
             int overloadedVehicles = 0;
+            int totalCapacityViolation = 0; // Track total excess passengers across all vehicles
 
             foreach (var vehicle in solution.Vehicles)
             {
@@ -353,6 +401,7 @@ namespace claudpro.Services
                 if (vehicle.AssignedPassengers.Count > vehicle.Capacity)
                 {
                     overloadedVehicles++;
+                    totalCapacityViolation += (vehicle.AssignedPassengers.Count - vehicle.Capacity);
                 }
 
                 // Calculate route metrics
@@ -370,13 +419,14 @@ namespace claudpro.Services
             double assignmentScore = assignedCount * 100.0; // High priority for assigning all passengers
             double vehicleUtilizationScore = usedVehicles * -10.0; // Prefer using fewer vehicles
             double overloadPenalty = overloadedVehicles * -200.0; // Severe penalty for overloading
+            double capacityViolationPenalty = totalCapacityViolation * -300.0; // Additional penalty for how many passengers over capacity
 
             // Unassigned passenger penalty
             double unassignedPenalty = (passengers.Count - assignedCount) * -1000.0;
 
             // Calculate final score - higher is better
             double score = distanceScore + assignmentScore + vehicleUtilizationScore +
-                           overloadPenalty  + unassignedPenalty;
+                           overloadPenalty + capacityViolationPenalty + unassignedPenalty;
 
             return score;
         }
@@ -384,7 +434,7 @@ namespace claudpro.Services
         /// <summary>
         /// Calculates route metrics for a vehicle
         /// </summary>
-        private double  CalculateRouteMetrics(Vehicle vehicle)
+        private double CalculateRouteMetrics(Vehicle vehicle)
         {
             if (vehicle.AssignedPassengers.Count == 0)
                 return 0;
@@ -411,7 +461,7 @@ namespace claudpro.Services
                 destinationLat, destinationLng);
             totalDistance += destDistance;
 
-           
+
 
             return totalDistance;
         }
@@ -569,7 +619,7 @@ namespace claudpro.Services
         private void Mutate(Solution solution)
         {
             // Choose a mutation strategy
-            int mutationType = random.Next(4);
+            int mutationType = random.Next(5); // Added one more mutation type for capacity optimization
 
             switch (mutationType)
             {
@@ -589,10 +639,78 @@ namespace claudpro.Services
                     // Optimize routes using 2-opt local search
                     OptimizeRoutes(solution);
                     break;
+                case 4:
+                    // Optimize capacity by moving passengers from overloaded vehicles
+                    OptimizeCapacity(solution);
+                    break;
             }
 
             // Re-evaluate solution
             solution.Score = Evaluate(solution);
+        }
+
+        /// <summary>
+        /// Optimizes capacity by moving passengers from overloaded vehicles to vehicles with available capacity
+        /// </summary>
+        private void OptimizeCapacity(Solution solution)
+        {
+            // Find overloaded vehicles
+            var overloadedVehicles = solution.Vehicles
+                .Where(v => v.AssignedPassengers.Count > v.Capacity)
+                .OrderByDescending(v => v.AssignedPassengers.Count - v.Capacity) // Most overloaded first
+                .ToList();
+
+            if (overloadedVehicles.Count == 0) return;
+
+            // Find vehicles with available capacity
+            var vehiclesWithCapacity = solution.Vehicles
+                .Where(v => v.AssignedPassengers.Count < v.Capacity)
+                .OrderBy(v => v.AssignedPassengers.Count) // Emptiest first
+                .ToList();
+
+            if (vehiclesWithCapacity.Count == 0) return;
+
+            // Process each overloaded vehicle
+            foreach (var overloadedVehicle in overloadedVehicles)
+            {
+                // How many passengers need to be moved
+                int excessPassengers = overloadedVehicle.AssignedPassengers.Count - overloadedVehicle.Capacity;
+
+                // Try to move excess passengers
+                for (int i = 0; i < excessPassengers; i++)
+                {
+                    // Skip if we've fixed this vehicle or run out of options
+                    if (overloadedVehicle.AssignedPassengers.Count <= overloadedVehicle.Capacity ||
+                        vehiclesWithCapacity.Count == 0)
+                        break;
+
+                    // Choose a passenger to move (best to move someone at the end of the route)
+                    var passengerToMove = overloadedVehicle.AssignedPassengers.Last();
+
+                    // Find the best vehicle to move to
+                    bool movedPassenger = false;
+                    foreach (var targetVehicle in vehiclesWithCapacity)
+                    {
+                        if (targetVehicle.AssignedPassengers.Count < targetVehicle.Capacity)
+                        {
+                            // Move the passenger
+                            overloadedVehicle.AssignedPassengers.Remove(passengerToMove);
+                            targetVehicle.AssignedPassengers.Add(passengerToMove);
+                            movedPassenger = true;
+
+                            // Update target vehicle status if it's now full
+                            if (targetVehicle.AssignedPassengers.Count >= targetVehicle.Capacity)
+                            {
+                                vehiclesWithCapacity.Remove(targetVehicle);
+                            }
+
+                            break;
+                        }
+                    }
+
+                    if (!movedPassenger) break; // No more vehicles with capacity
+                }
+            }
         }
 
         /// <summary>
