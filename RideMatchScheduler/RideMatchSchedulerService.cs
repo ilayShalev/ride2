@@ -6,8 +6,8 @@ using System.Timers;
 using System.Threading.Tasks;
 using System.IO;
 using System.Configuration;
-using claudpro.Models;
-using claudpro.Services;
+using RideMatchProject.Models;
+using RideMatchProject.Services;
 
 namespace RideMatchScheduler
 {

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace claudpro.Models
+namespace RideMatchProject.Models
 {
     public class RouteDetails
     {

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace claudpro.UI
+namespace RideMatchProject.UI
 {
     /// <summary>
     /// Extensions for UI controls to simplify UI operations

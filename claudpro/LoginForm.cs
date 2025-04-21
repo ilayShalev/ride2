@@ -2,10 +2,10 @@
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using claudpro.Services;
-using claudpro.UI;
+using RideMatchProject.Services;
+using RideMatchProject.UI;
 
-namespace claudpro
+namespace RideMatchProject
 {
     public partial class LoginForm : Form
     {

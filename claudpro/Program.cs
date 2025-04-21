@@ -2,9 +2,9 @@
 using System.IO;
 using System.Configuration;
 using System.Windows.Forms;
-using claudpro.Services;
+using RideMatchProject.Services;
 
-namespace claudpro
+namespace RideMatchProject
 {
     internal static class Program
     {

@@ -5,10 +5,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GMap.NET;
-using claudpro.Services;
+using RideMatchProject.Services;
 using GMap.NET.WindowsForms;
 
-namespace claudpro.UI
+namespace RideMatchProject.UI
 {
     public class AddressSearchControl : UserControl
     {

@@ -2,9 +2,9 @@
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using claudpro.Services;
+using RideMatchProject.Services;
 
-namespace claudpro.UI
+namespace RideMatchProject.UI
 {
     public class UserEditForm : Form
     {

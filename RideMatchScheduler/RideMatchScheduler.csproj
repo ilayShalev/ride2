@@ -139,9 +139,9 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\claudpro\claudpro.csproj">
+    <ProjectReference Include="..\claudpro\RideMatchProject.csproj">
       <Project>{d3ca30de-5315-4f1f-8656-c7d1b7ca1afd}</Project>
-      <Name>claudpro</Name>
+      <Name>RideMatchProject</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

@@ -1,9 +1,9 @@
-﻿using claudpro.UI;
+﻿using RideMatchProject.UI;
 using System;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace claudpro
+namespace RideMatchProject
 {
     partial class AdminForm
     {

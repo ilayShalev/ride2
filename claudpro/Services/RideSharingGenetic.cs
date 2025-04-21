@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using claudpro.Models;
-using claudpro.Utilities;
+using RideMatchProject.Models;
+using RideMatchProject.Utilities;
 
-namespace claudpro.Services
+namespace RideMatchProject.Services
 {
     /// <summary>
     /// Implements a genetic algorithm to optimize ride sharing assignments

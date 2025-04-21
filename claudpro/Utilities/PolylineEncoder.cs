@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using GMap.NET;
 
-namespace claudpro.Utilities
+namespace RideMatchProject.Utilities
 {
     public static class PolylineEncoder
     {

@@ -5,9 +5,9 @@ using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using claudpro.Models;
+using RideMatchProject.Models;
 
-namespace claudpro.Services
+namespace RideMatchProject.Services
 {
     public class DatabaseService : IDisposable
     {

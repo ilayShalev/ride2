@@ -12,10 +12,10 @@ using GMap.NET.MapProviders;
 using GMap.NET.WindowsForms;
 using GMap.NET.WindowsForms.Markers;
 using Newtonsoft.Json;
-using claudpro.Models;
-using claudpro.Utilities;
+using RideMatchProject.Models;
+using RideMatchProject.Utilities;
 
-namespace claudpro.Services
+namespace RideMatchProject.Services
 {
     public class MapService : IDisposable
     {

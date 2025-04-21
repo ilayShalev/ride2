@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace claudpro.Models
+namespace RideMatchProject.Models
 {
     public class Vehicle
     {

@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace claudpro.Properties
+namespace RideMatchProject.Properties
 {
 
 

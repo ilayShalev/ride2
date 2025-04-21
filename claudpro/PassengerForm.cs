@@ -6,11 +6,11 @@ using System.Windows.Forms;
 using GMap.NET;
 using GMap.NET.WindowsForms;
 using GMap.NET.WindowsForms.Markers;
-using claudpro.Models;
-using claudpro.Services;
-using claudpro.UI;
+using RideMatchProject.Models;
+using RideMatchProject.Services;
+using RideMatchProject.UI;
 
-namespace claudpro
+namespace RideMatchProject
 {
     public partial class PassengerForm : Form
     {

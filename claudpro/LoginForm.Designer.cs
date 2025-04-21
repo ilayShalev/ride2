@@ -1,4 +1,4 @@
-﻿namespace claudpro
+﻿namespace RideMatchProject
 {
     partial class LoginForm
     {

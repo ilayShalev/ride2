@@ -7,9 +7,9 @@ using System.Drawing;
 using GMap.NET;
 using GMap.NET.WindowsForms;
 using GMap.NET.WindowsForms.Markers;
-using claudpro.Models;
+using RideMatchProject.Models;
 
-namespace claudpro.UI
+namespace RideMatchProject.UI
 {
     /// <summary>
     /// Handles creation of map overlays and markers
