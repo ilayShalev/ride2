@@ -12,135 +12,590 @@ using RideMatchProject.UI;
 
 namespace RideMatchProject
 {
+    /// <summary>
+    /// Main passenger form that displays ride information and allows location selection
+    /// </summary>
     public partial class PassengerForm : Form
     {
-        // Fields for database and services
-        private readonly DatabaseService dbService;
-        private readonly MapService mapService;
-        private readonly int userId;
-        private readonly string username;
+        // Core components
+        private PassengerController _controller;
+        private UIManager _uiManager;
+        private DataAccessLayer _dataLayer;
+        private MapVisualizer _mapVisualizer;
 
-        // UI controls
-        private GMapControl gMapControl;
-        private CheckBox availabilityCheckBox;
-        private RichTextBox assignmentDetailsTextBox;
-        private Button refreshButton;
-        private Button logoutButton;
-        private Panel leftPanel;
+        // Store dependencies for designer support
+        private readonly int _userId;
+        private readonly string _username;
 
-        // Fields for location setting functionality
-        private bool isSettingLocation = false;
-        private Label locationInstructionsLabel;
-        private TextBox addressTextBox;
-
-        // Data models
-        private Passenger passenger;
-        private Vehicle assignedVehicle;
-        private DateTime? pickupTime;
-
+        /// <summary>
+        /// Constructor for the passenger form
+        /// </summary>
         public PassengerForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
-            this.dbService = dbService;
-            this.mapService = mapService;
-            this.userId = userId;
-            this.username = username;
+            _userId = userId;
+            _username = username;
 
-            // Use the designer-generated InitializeComponent
+            // Call the designer's InitializeComponent method
             InitializeComponent();
 
-            // Setup UI manually
-            SetupUI();
-
-            this.Load += async (s, e) => await LoadPassengerDataAsync();
+            InitializeServices(dbService, mapService);
+            ConfigureForm();
+            SubscribeToEvents();
         }
 
-        private void SetupUI()
+        /// <summary>
+        /// Set up all services and dependencies
+        /// </summary>
+        private void InitializeServices(DatabaseService dbService, MapService mapService)
         {
-            // Set form properties
-            this.Size = new Size(1000, 700);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterScreen;
+            // Create UI components first
+            _uiManager = new UIManager(this, _username);
 
-            // Title
-            var titleLabel = ControlExtensions.CreateLabel(
-                $"Welcome, {username}",
-                new Point(20, 20),
-                new Size(960, 30),
-                new Font("Arial", 16, FontStyle.Bold),
-                ContentAlignment.MiddleCenter
-            );
-            Controls.Add(titleLabel);
+            // Set up data access
+            _dataLayer = new DataAccessLayer(dbService, _userId, _username);
 
-            // Left panel for controls and details
-            leftPanel = ControlExtensions.CreatePanel(
-                new Point(20, 70),
-                new Size(350, 580),
-                BorderStyle.FixedSingle
-            );
-            Controls.Add(leftPanel);
+            // Set up map visualization
+            _mapVisualizer = new MapVisualizer(mapService, dbService, _uiManager.GetMapControl());
 
-            // Availability controls
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Tomorrow's Status:",
-                new Point(20, 20),
-                new Size(150, 20),
-                new Font("Arial", 10, FontStyle.Bold)
-            ));
+            // Create the controller last, injecting all dependencies
+            _controller = new PassengerController(_dataLayer, _mapVisualizer, _uiManager);
+        }
 
-            availabilityCheckBox = ControlExtensions.CreateCheckBox(
-                "I need a ride tomorrow",
-                new Point(20, 50),
-                new Size(300, 30),
-                true
-            );
-            availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
-            leftPanel.Controls.Add(availabilityCheckBox);
+        /// <summary>
+        /// Configure form appearance
+        /// </summary>
+        private void ConfigureForm()
+        {
+            Size = new Size(1000, 700);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterScreen;
+            Text = "Passenger Dashboard";
+        }
 
-            var statusPanel = ControlExtensions.CreatePanel(
-                new Point(20, 90),
-                new Size(310, 2),
-                BorderStyle.FixedSingle
-            );
-            statusPanel.BackColor = Color.Gray;
-            leftPanel.Controls.Add(statusPanel);
+        /// <summary>
+        /// Subscribe to form events
+        /// </summary>
+        private void SubscribeToEvents()
+        {
+            // Simply add our event handler - the designer's handlers will also run
+            Load += OnFormLoad;
+        }
 
-            // Assignment details section
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Your Ride Details:",
-                new Point(20, 110),
-                new Size(200, 20),
-                new Font("Arial", 10, FontStyle.Bold)
-            ));
+        /// <summary>
+        /// Handle form load event
+        /// </summary>
+        private async void OnFormLoad(object sender, EventArgs e)
+        {
+            try
+            {
+                // Run directly on UI thread to avoid cross-thread errors
+                await _controller.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading data: {ex.Message}",
+                    "Initialization Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
 
-            assignmentDetailsTextBox = ControlExtensions.CreateRichTextBox(
-                new Point(20, 140),
-                new Size(310, 200),
-                true
-            );
-            leftPanel.Controls.Add(assignmentDetailsTextBox);
+        /// <summary>
+        /// Event handler required by the designer
+        /// </summary>
+        public void PassengerForm_Load(object sender, EventArgs e)
+        {
+            // Call our implementation method
+            OnFormLoad(sender, e);
+        }
 
-            // Add location setting controls
-            AddLocationSettingControls();
+        // Do not implement InitializeComponent - it's generated by the designer
+    }
 
-            // Buttons
-            refreshButton = ControlExtensions.CreateButton(
-                "Refresh",
-                new Point(20, 530),
-                new Size(150, 30),
-                async (s, e) => await LoadPassengerDataAsync()
-            );
-            leftPanel.Controls.Add(refreshButton);
+    /// <summary>
+    /// Controller for passenger form logic
+    /// </summary>
+    public class PassengerController
+    {
+        private readonly DataAccessLayer _dataLayer;
+        private readonly MapVisualizer _mapVisualizer;
+        private readonly UIManager _uiManager;
+        private bool _isSettingLocation;
 
-            logoutButton = ControlExtensions.CreateButton(
-                "Logout",
-                new Point(180, 530),
-                new Size(150, 30),
-                (s, e) => Close()
-            );
-            leftPanel.Controls.Add(logoutButton);
+        public PassengerController(
+            DataAccessLayer dataLayer,
+            MapVisualizer mapVisualizer,
+            UIManager uiManager)
+        {
+            _dataLayer = dataLayer;
+            _mapVisualizer = mapVisualizer;
+            _uiManager = uiManager;
+            _isSettingLocation = false;
 
-            // Map
-            gMapControl = new GMapControl
+            SubscribeToEvents();
+        }
+
+        private void SubscribeToEvents()
+        {
+            _uiManager.AvailabilityChanged += async (sender, isAvailable) =>
+                await UpdateAvailabilityAsync(isAvailable);
+
+            _uiManager.RefreshRequested += async (sender, args) =>
+                await RefreshDataAsync();
+
+            _uiManager.SetLocationRequested += (sender, args) =>
+                EnableLocationSelection();
+
+            _uiManager.AddressSearchRequested += async (sender, address) =>
+                await SearchAddressAsync(address);
+
+            _mapVisualizer.MapClicked += (sender, point) =>
+                HandleMapClick(point);
+        }
+
+        public async Task InitializeAsync()
+        {
+            _uiManager.ShowLoadingMessage("Initializing...");
+            await _mapVisualizer.InitializeMapAsync();
+            await RefreshDataAsync();
+        }
+
+        private async Task RefreshDataAsync()
+        {
+            _uiManager.ShowLoadingMessage("Loading passenger data...");
+            await _dataLayer.LoadPassengerDataAsync();
+
+            var passenger = _dataLayer.CurrentPassenger;
+            var vehicle = _dataLayer.AssignedVehicle;
+
+            if (passenger != null)
+            {
+                _uiManager.UpdateAvailabilityControl(passenger.IsAvailableTomorrow);
+                _uiManager.DisplayPassengerDetails(passenger, vehicle, _dataLayer.PickupTime);
+                _mapVisualizer.DisplayPassenger(passenger, vehicle);
+            }
+            else
+            {
+                _uiManager.ShowNoProfileMessage();
+            }
+        }
+
+        private void EnableLocationSelection()
+        {
+            _isSettingLocation = true;
+            _uiManager.ShowLocationSelectionInstructions(true);
+            _mapVisualizer.EnableLocationSelection(true);
+        }
+
+        private void HandleMapClick(PointLatLng point)
+        {
+            if (!_isSettingLocation)
+            {
+                return;
+            }
+
+            _isSettingLocation = false;
+            _uiManager.ShowLocationSelectionInstructions(false);
+            _mapVisualizer.EnableLocationSelection(false);
+
+            UpdatePassengerLocationAsync(point.Lat, point.Lng);
+        }
+
+        private async Task SearchAddressAsync(string address)
+        {
+            _uiManager.SetSearchControlsEnabled(false);
+
+            var coordinates = await _mapVisualizer.GeocodeAddressAsync(address);
+            if (coordinates.HasValue)
+            {
+                await UpdatePassengerLocationAsync(coordinates.Value.Latitude, coordinates.Value.Longitude);
+            }
+            else
+            {
+                _uiManager.ShowErrorMessage("Address not found. Please try again.");
+            }
+
+            _uiManager.SetSearchControlsEnabled(true);
+        }
+
+        private async Task UpdatePassengerLocationAsync(double latitude, double longitude)
+        {
+            _uiManager.ShowBusyState(true);
+
+            string address = await _mapVisualizer.ReverseGeocodeAsync(latitude, longitude);
+            await _dataLayer.UpdatePassengerLocationAsync(latitude, longitude, address);
+
+            _uiManager.ShowLocationUpdatedMessage(address);
+            await RefreshDataAsync();
+
+            _uiManager.ShowBusyState(false);
+        }
+
+        private async Task UpdateAvailabilityAsync(bool isAvailable)
+        {
+            var passenger = _dataLayer.CurrentPassenger;
+            if (passenger == null)
+            {
+                return;
+            }
+
+            bool success = await _dataLayer.UpdatePassengerAvailabilityAsync(isAvailable);
+
+            if (success)
+            {
+                if (isAvailable && _dataLayer.AssignedVehicle == null)
+                {
+                    _uiManager.ShowRideRequestMessage();
+                }
+            }
+            else
+            {
+                _uiManager.ShowErrorMessage("Failed to update availability");
+                _uiManager.UpdateAvailabilityControl(passenger.IsAvailableTomorrow);
+            }
+
+            await RefreshDataAsync();
+        }
+    }
+
+    /// <summary>
+    /// Handles access to data layer and database operations
+    /// </summary>
+    public class DataAccessLayer
+    {
+        private readonly DatabaseService _databaseService;
+        private readonly int _userId;
+        private readonly string _username;
+
+        public Passenger CurrentPassenger { get; private set; }
+        public Vehicle AssignedVehicle { get; private set; }
+        public DateTime? PickupTime { get; private set; }
+
+        public DataAccessLayer(DatabaseService databaseService, int userId, string username)
+        {
+            _databaseService = databaseService;
+            _userId = userId;
+            _username = username;
+        }
+
+        public async Task LoadPassengerDataAsync()
+        {
+            try
+            {
+                CurrentPassenger = await _databaseService.GetPassengerByUserIdAsync(_userId);
+
+                if (CurrentPassenger != null)
+                {
+                    var assignment = await _databaseService.GetPassengerAssignmentAsync(
+                        _userId, DateTime.Now.ToString("yyyy-MM-dd"));
+
+                    AssignedVehicle = assignment.AssignedVehicle;
+                    PickupTime = assignment.PickupTime;
+
+                    if (CurrentPassenger.Id > 0)
+                    {
+                        var fullPassenger = await _databaseService.GetPassengerByIdAsync(CurrentPassenger.Id);
+
+                        if (fullPassenger != null && !string.IsNullOrEmpty(fullPassenger.EstimatedPickupTime))
+                        {
+                            CurrentPassenger.EstimatedPickupTime = fullPassenger.EstimatedPickupTime;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new DataException("Failed to load passenger data", ex);
+            }
+        }
+
+        public async Task<bool> UpdatePassengerAvailabilityAsync(bool isAvailable)
+        {
+            if (CurrentPassenger == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                bool success = await _databaseService.UpdatePassengerAvailabilityAsync(
+                    CurrentPassenger.Id, isAvailable);
+
+                if (success)
+                {
+                    CurrentPassenger.IsAvailableTomorrow = isAvailable;
+                }
+
+                return success;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        public async Task UpdatePassengerLocationAsync(double latitude, double longitude, string address)
+        {
+            try
+            {
+                if (CurrentPassenger == null)
+                {
+                    int passengerId = await _databaseService.AddPassengerAsync(
+                        _userId, _username, latitude, longitude, address);
+
+                    CurrentPassenger = new Passenger
+                    {
+                        Id = passengerId,
+                        UserId = _userId,
+                        Name = _username,
+                        Latitude = latitude,
+                        Longitude = longitude,
+                        Address = address,
+                        IsAvailableTomorrow = true
+                    };
+                }
+                else
+                {
+                    CurrentPassenger.Latitude = latitude;
+                    CurrentPassenger.Longitude = longitude;
+                    CurrentPassenger.Address = address;
+
+                    await _databaseService.UpdatePassengerAsync(
+                        CurrentPassenger.Id,
+                        CurrentPassenger.Name,
+                        latitude,
+                        longitude,
+                        address);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new DataException("Failed to update passenger location", ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Manages map visualization and location services
+    /// </summary>
+    public class MapVisualizer
+    {
+        private readonly MapService _mapService;
+        private readonly DatabaseService _databaseService;
+        private readonly GMapControl _mapControl;
+
+        public event EventHandler<PointLatLng> MapClicked;
+
+        public MapVisualizer(MapService mapService, DatabaseService databaseService, GMapControl mapControl)
+        {
+            _mapService = mapService;
+            _databaseService = databaseService;
+            _mapControl = mapControl;
+        }
+
+        public async Task InitializeMapAsync()
+        {
+            if (_mapControl != null)
+            {
+                EnsureUIThread(() => {
+                    _mapService.InitializeGoogleMaps(_mapControl);
+                    _mapControl.Position = new PointLatLng(32.0741, 34.7922); // Default to Tel Aviv
+                    _mapControl.Zoom = 12;
+                });
+            }
+        }
+
+        public void EnableLocationSelection(bool enable)
+        {
+            if (_mapControl == null)
+            {
+                return;
+            }
+
+            EnsureUIThread(() => {
+                _mapControl.Cursor = enable ? Cursors.Hand : Cursors.Default;
+
+                if (enable)
+                {
+                    _mapControl.MouseClick += HandleMapClick;
+                }
+                else
+                {
+                    _mapControl.MouseClick -= HandleMapClick;
+                }
+            });
+        }
+
+        private void HandleMapClick(object sender, MouseEventArgs e)
+        {
+            if (_mapControl == null) return;
+
+            PointLatLng point = _mapControl.FromLocalToLatLng(e.X, e.Y);
+            MapClicked?.Invoke(this, point);
+        }
+
+        public async Task<(double Latitude, double Longitude)?> GeocodeAddressAsync(string address)
+        {
+            return await _mapService.GeocodeAddressAsync(address);
+        }
+
+        public async Task<string> ReverseGeocodeAsync(double latitude, double longitude)
+        {
+            return await _mapService.ReverseGeocodeAsync(latitude, longitude);
+        }
+
+        public void DisplayPassenger(Passenger passenger, Vehicle vehicle)
+        {
+            if (_mapControl == null || passenger == null)
+            {
+                return;
+            }
+
+            EnsureUIThread(() => {
+                _mapControl.Overlays.Clear();
+
+                var passengersOverlay = new GMapOverlay("passengers");
+                var marker = MapOverlays.CreatePassengerMarker(passenger);
+                passengersOverlay.Markers.Add(marker);
+                _mapControl.Overlays.Add(passengersOverlay);
+
+                if (vehicle != null)
+                {
+                    DisplayDestination();
+                }
+
+                _mapControl.Position = new PointLatLng(passenger.Latitude, passenger.Longitude);
+                _mapControl.Zoom = 15;
+                _mapControl.Refresh();
+            });
+        }
+
+        private void DisplayDestination()
+        {
+            Task.Run(async () => {
+                var destination = await GetDestinationAsync();
+
+                EnsureUIThread(() => {
+                    try
+                    {
+                        var destinationOverlay = new GMapOverlay("destination");
+                        var destinationMarker = MapOverlays.CreateDestinationMarker(
+                            destination.Latitude, destination.Longitude);
+
+                        destinationOverlay.Markers.Add(destinationMarker);
+                        _mapControl.Overlays.Add(destinationOverlay);
+                        _mapControl.Refresh();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error creating destination marker: {ex.Message}");
+                    }
+                });
+            });
+        }
+
+        private async Task<(double Latitude, double Longitude)> GetDestinationAsync()
+        {
+            var destination = await _databaseService.GetDestinationAsync();
+            return (destination.Latitude, destination.Longitude);
+        }
+
+        /// <summary>
+        /// Ensures that code runs on the UI thread
+        /// </summary>
+        private void EnsureUIThread(Action action)
+        {
+            if (_mapControl.InvokeRequired)
+            {
+                try
+                {
+                    _mapControl.Invoke(action);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Control may have been disposed if form is closing
+                }
+                catch (InvalidOperationException)
+                {
+                    // Handle case where handle isn't created yet
+                }
+            }
+            else
+            {
+                action();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Manages the user interface components
+    /// </summary>
+    public class UIManager
+    {
+        private readonly Form _parentForm;
+        private readonly string _username;
+
+        private GMapControl _mapControl;
+        private CheckBox _availabilityCheckBox;
+        private RichTextBox _detailsTextBox;
+        private Button _refreshButton;
+        private Button _logoutButton;
+        private Button _setLocationButton;
+        private TextBox _addressTextBox;
+        private Button _searchButton;
+        private Label _instructionsLabel;
+        private Panel _leftPanel;
+
+        public event EventHandler<bool> AvailabilityChanged;
+        public event EventHandler RefreshRequested;
+        public event EventHandler SetLocationRequested;
+        public event EventHandler<string> AddressSearchRequested;
+
+        public UIManager(Form parentForm, string username)
+        {
+            _parentForm = parentForm;
+            _username = username;
+
+            InitializeUI();
+        }
+
+        public void InitializeUI()
+        {
+            CreateTitleLabel();
+            CreateLeftPanel();
+            CreateMapControl();
+
+            CreateAvailabilitySection();
+            CreateDetailsSection();
+            CreateLocationSection();
+            CreateActionButtons();
+        }
+
+        private void CreateTitleLabel()
+        {
+            var titleLabel = new Label
+            {
+                Text = $"Welcome, {_username}",
+                Location = new Point(20, 20),
+                Size = new Size(960, 30),
+                Font = new Font("Arial", 16, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            _parentForm.Controls.Add(titleLabel);
+        }
+
+        private void CreateLeftPanel()
+        {
+            _leftPanel = new Panel
+            {
+                Location = new Point(20, 70),
+                Size = new Size(350, 580),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            _parentForm.Controls.Add(_leftPanel);
+        }
+
+        private void CreateMapControl()
+        {
+            _mapControl = new GMapControl
             {
                 Location = new Point(390, 70),
                 Size = new Size(580, 580),
@@ -149,450 +604,384 @@ namespace RideMatchProject
                 Zoom = 13,
                 DragButton = MouseButtons.Left
             };
-            Controls.Add(gMapControl);
-            mapService.InitializeGoogleMaps(gMapControl);
+            _parentForm.Controls.Add(_mapControl);
         }
 
-        private void AddLocationSettingControls()
+        private void CreateAvailabilitySection()
         {
-            // Add a separator panel
-            var locationPanel = ControlExtensions.CreatePanel(
-                new Point(20, 350),
-                new Size(310, 2),
-                BorderStyle.FixedSingle
-            );
-            locationPanel.BackColor = Color.Gray;
-            leftPanel.Controls.Add(locationPanel);
-
-            // Add location setting section title
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Set Your Pickup Location:",
-                new Point(20, 360),
-                new Size(200, 20),
-                new Font("Arial", 10, FontStyle.Bold)
-            ));
-
-            // Add a button for setting location
-            var setLocationButton = ControlExtensions.CreateButton(
-                "Set Location on Map",
-                new Point(20, 390),
-                new Size(150, 30),
-                (s, e) => EnableMapLocationSelection()
-            );
-            leftPanel.Controls.Add(setLocationButton);
-
-            // Add a search box for address
-            leftPanel.Controls.Add(ControlExtensions.CreateLabel(
-                "Or Search Address:",
-                new Point(20, 430),
-                new Size(150, 20)
-            ));
-
-            addressTextBox = ControlExtensions.CreateTextBox(
-                new Point(20, 455),
-                new Size(220, 25)
-            );
-            var searchButton = ControlExtensions.CreateButton(
-                "Search",
-                new Point(250, 455),
-                new Size(80, 25),
-                async (s, e) => await SearchAddressAsync(addressTextBox.Text)
-            );
-
-            leftPanel.Controls.Add(addressTextBox);
-            leftPanel.Controls.Add(searchButton);
-
-            // Add instructions label
-            locationInstructionsLabel = ControlExtensions.CreateLabel(
-                "Click on the map to set your pickup location",
-                new Point(20, 490),
-                new Size(310, 20),
-                null,
-                ContentAlignment.MiddleCenter
-            );
-            locationInstructionsLabel.ForeColor = Color.Red;
-            locationInstructionsLabel.Visible = false;
-            leftPanel.Controls.Add(locationInstructionsLabel);
-        }
-
-
-        private void EnableMapLocationSelection()
-        {
-            isSettingLocation = true;
-            locationInstructionsLabel.Visible = true;
-
-            // Change cursor to indicate map is clickable
-            gMapControl.Cursor = Cursors.Hand;
-
-            // Add event handler for map clicks
-            gMapControl.MouseClick += MapClickToSetLocation;
-
-            MessageBox.Show("Click on the map to set your pickup location",
-                "Set Location", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-
-        private void MapClickToSetLocation(object sender, MouseEventArgs e)
-        {
-            if (!isSettingLocation) return;
-
-            // Convert clicked point to geo coordinates
-            PointLatLng point = gMapControl.FromLocalToLatLng(e.X, e.Y);
-
-            // Set passenger location
-            UpdatePassengerLocation(point.Lat, point.Lng);
-
-            // Disable location setting mode
-            isSettingLocation = false;
-            locationInstructionsLabel.Visible = false;
-            gMapControl.Cursor = Cursors.Default;
-            gMapControl.MouseClick -= MapClickToSetLocation;
-        }
-
-        private async Task SearchAddressAsync(string address)
-        {
-            if (string.IsNullOrWhiteSpace(address)) return;
-
-            try
+            var statusLabel = new Label
             {
-                // Show searching indicator
-                Cursor = Cursors.WaitCursor;
-                addressTextBox.Enabled = false;
+                Text = "Tomorrow's Status:",
+                Location = new Point(20, 20),
+                Size = new Size(150, 20),
+                Font = new Font("Arial", 10, FontStyle.Bold)
+            };
+            _leftPanel.Controls.Add(statusLabel);
 
-                var result = await mapService.GeocodeAddressAsync(address);
-                if (result.HasValue)
+            _availabilityCheckBox = new CheckBox
+            {
+                Text = "I need a ride tomorrow",
+                Location = new Point(20, 50),
+                Size = new Size(300, 30),
+                Checked = true
+            };
+
+            _availabilityCheckBox.CheckedChanged += (s, e) =>
+                AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
+
+            _leftPanel.Controls.Add(_availabilityCheckBox);
+
+            var divider = new Panel
+            {
+                Location = new Point(20, 90),
+                Size = new Size(310, 2),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.Gray
+            };
+            _leftPanel.Controls.Add(divider);
+        }
+
+        private void CreateDetailsSection()
+        {
+            var detailsLabel = new Label
+            {
+                Text = "Your Ride Details:",
+                Location = new Point(20, 110),
+                Size = new Size(200, 20),
+                Font = new Font("Arial", 10, FontStyle.Bold)
+            };
+            _leftPanel.Controls.Add(detailsLabel);
+
+            _detailsTextBox = new RichTextBox
+            {
+                Location = new Point(20, 140),
+                Size = new Size(310, 200),
+                ReadOnly = true
+            };
+            _leftPanel.Controls.Add(_detailsTextBox);
+        }
+
+        private void CreateLocationSection()
+        {
+            var divider = new Panel
+            {
+                Location = new Point(20, 350),
+                Size = new Size(310, 2),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.Gray
+            };
+            _leftPanel.Controls.Add(divider);
+
+            var locationLabel = new Label
+            {
+                Text = "Set Your Pickup Location:",
+                Location = new Point(20, 360),
+                Size = new Size(200, 20),
+                Font = new Font("Arial", 10, FontStyle.Bold)
+            };
+            _leftPanel.Controls.Add(locationLabel);
+
+            // Create button without event handler first
+            _setLocationButton = new Button
+            {
+                Text = "Set Location on Map",
+                Location = new Point(20, 390),
+                Size = new Size(150, 30)
+            };
+            // Add event handler separately
+            _setLocationButton.Click += (s, e) => SetLocationRequested?.Invoke(this, EventArgs.Empty);
+            _leftPanel.Controls.Add(_setLocationButton);
+
+            var searchLabel = new Label
+            {
+                Text = "Or Search Address:",
+                Location = new Point(20, 430),
+                Size = new Size(150, 20)
+            };
+            _leftPanel.Controls.Add(searchLabel);
+
+            _addressTextBox = new TextBox
+            {
+                Location = new Point(20, 455),
+                Size = new Size(220, 25)
+            };
+
+            // Create button without event handler first
+            _searchButton = new Button
+            {
+                Text = "Search",
+                Location = new Point(250, 455),
+                Size = new Size(80, 25)
+            };
+            // Add event handler separately
+            _searchButton.Click += (s, e) => AddressSearchRequested?.Invoke(this, _addressTextBox.Text);
+            _leftPanel.Controls.Add(_addressTextBox);
+            _leftPanel.Controls.Add(_searchButton);
+
+            _instructionsLabel = new Label
+            {
+                Text = "Click on the map to set your pickup location",
+                Location = new Point(20, 490),
+                Size = new Size(310, 20),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Color.Red,
+                Visible = false
+            };
+            _leftPanel.Controls.Add(_instructionsLabel);
+        }
+
+        private void CreateActionButtons()
+        {
+            // Create button without event handler first
+            _refreshButton = new Button
+            {
+                Text = "Refresh",
+                Location = new Point(20, 530),
+                Size = new Size(150, 30)
+            };
+            // Add event handler separately
+            _refreshButton.Click += (s, e) => RefreshRequested?.Invoke(this, EventArgs.Empty);
+            _leftPanel.Controls.Add(_refreshButton);
+
+            // Create button without event handler first
+            _logoutButton = new Button
+            {
+                Text = "Logout",
+                Location = new Point(180, 530),
+                Size = new Size(150, 30)
+            };
+            // Add event handler separately
+            _logoutButton.Click += (s, e) => _parentForm.Close();
+            _leftPanel.Controls.Add(_logoutButton);
+        }
+
+        public void ShowLoadingMessage(string message)
+        {
+            InvokeOnUIThread(() => {
+                _detailsTextBox.Clear();
+                _detailsTextBox.AppendText(message);
+                _refreshButton.Enabled = false;
+            });
+        }
+
+        public void DisplayPassengerDetails(Passenger passenger, Vehicle vehicle, DateTime? pickupTime)
+        {
+            InvokeOnUIThread(() => {
+                if (_detailsTextBox == null)
                 {
-                    // Center map on found location
-                    gMapControl.Position = new PointLatLng(result.Value.Latitude, result.Value.Longitude);
-                    gMapControl.Zoom = 15;
+                    return;
+                }
 
-                    // Update passenger location
-                    UpdatePassengerLocation(result.Value.Latitude, result.Value.Longitude);
+                _detailsTextBox.Clear();
+
+                AppendPassengerInfo(passenger);
+
+                if (vehicle != null)
+                {
+                    AppendVehicleInfo(vehicle, passenger, pickupTime);
                 }
                 else
                 {
-                    MessageBox.Show("Address not found. Please try again.", "Search Error",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    AppendNoVehicleMessage();
                 }
-            }
-            catch (Exception ex)
+
+                _refreshButton.Enabled = true;
+            });
+        }
+
+        private void AppendPassengerInfo(Passenger passenger)
+        {
+            _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
+            _detailsTextBox.AppendText("Your Information:\n");
+            _detailsTextBox.SelectionFont = _detailsTextBox.Font;
+            _detailsTextBox.AppendText($"Name: {passenger.Name}\n");
+
+            if (!string.IsNullOrEmpty(passenger.Address))
             {
-                MessageBox.Show($"Error searching: {ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _detailsTextBox.AppendText($"Pickup Location: {passenger.Address}\n\n");
             }
-            finally
+            else
             {
-                // Reset cursor and enable address box
-                Cursor = Cursors.Default;
-                addressTextBox.Enabled = true;
+                _detailsTextBox.AppendText(
+                    $"Pickup Location: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n\n");
             }
         }
 
-        private async void UpdatePassengerLocation(double latitude, double longitude)
+        private void AppendVehicleInfo(Vehicle vehicle, Passenger passenger, DateTime? pickupTime)
         {
-            try
+            _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
+            _detailsTextBox.AppendText("Your Scheduled Ride:\n");
+            _detailsTextBox.SelectionFont = _detailsTextBox.Font;
+
+            string driverName = !string.IsNullOrEmpty(vehicle.DriverName)
+                ? vehicle.DriverName
+                : $"Driver #{vehicle.Id}";
+
+            _detailsTextBox.AppendText($"Driver: {driverName}\n");
+
+            if (!string.IsNullOrEmpty(vehicle.Model))
             {
-                // Show waiting cursor
-                Cursor = Cursors.WaitCursor;
+                _detailsTextBox.AppendText($"Vehicle: {vehicle.Model}\n");
+            }
 
-                // Get address from coordinates (reverse geocoding)
-                string address = await mapService.ReverseGeocodeAsync(latitude, longitude);
+            if (!string.IsNullOrEmpty(vehicle.Color))
+            {
+                _detailsTextBox.AppendText($"Color: {vehicle.Color}\n");
+            }
 
-                // Update passenger in database
-                if (passenger == null)
-                {
-                    passenger = new Passenger
-                    {
-                        UserId = userId,
-                        Name = username,
-                        Latitude = latitude,
-                        Longitude = longitude,
-                        Address = address,
-                        IsAvailableTomorrow = availabilityCheckBox.Checked
-                    };
+            if (!string.IsNullOrEmpty(vehicle.LicensePlate))
+            {
+                _detailsTextBox.AppendText($"License Plate: {vehicle.LicensePlate}\n");
+            }
 
-                    int passengerId = await dbService.AddPassengerAsync(userId, username, latitude, longitude, address);
-                    passenger.Id = passengerId;
-                }
-                else
-                {
-                    passenger.Latitude = latitude;
-                    passenger.Longitude = longitude;
-                    passenger.Address = address;
+            AppendPickupTimeInfo(passenger, pickupTime);
 
-                    await dbService.UpdatePassengerAsync(passenger.Id, passenger.Name,
-                        latitude, longitude, address);
-                }
+            if (!string.IsNullOrEmpty(vehicle.StartAddress))
+            {
+                _detailsTextBox.AppendText($"Driver Starting From: {vehicle.StartAddress}\n");
+            }
+        }
 
-                // Show confirmation and update marker on map
+        private void AppendPickupTimeInfo(Passenger passenger, DateTime? pickupTime)
+        {
+            if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
+            {
+                _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
+                _detailsTextBox.AppendText($"Pickup Time: {passenger.EstimatedPickupTime}\n");
+                _detailsTextBox.SelectionFont = _detailsTextBox.Font;
+            }
+            else if (pickupTime.HasValue)
+            {
+                _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
+                _detailsTextBox.AppendText($"Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
+                _detailsTextBox.SelectionFont = _detailsTextBox.Font;
+            }
+            else
+            {
+                _detailsTextBox.AppendText("Pickup Time: Not yet scheduled\n");
+            }
+        }
+
+        private void AppendNoVehicleMessage()
+        {
+            _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
+            _detailsTextBox.AppendText("No Ride Scheduled Yet\n");
+            _detailsTextBox.SelectionFont = _detailsTextBox.Font;
+            _detailsTextBox.AppendText("Rides for tomorrow will be assigned by the system overnight.\n");
+            _detailsTextBox.AppendText("Please check back tomorrow morning for your ride details.\n");
+        }
+
+        public void ShowNoProfileMessage()
+        {
+            InvokeOnUIThread(() => {
+                _detailsTextBox.Clear();
+                _detailsTextBox.AppendText("No passenger profile found. Set your location to create a profile.\n");
+                _refreshButton.Enabled = true;
+            });
+        }
+
+        public void ShowErrorMessage(string message)
+        {
+            InvokeOnUIThread(() => {
+                MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            });
+        }
+
+        public void ShowLocationUpdatedMessage(string address)
+        {
+            InvokeOnUIThread(() => {
                 MessageBox.Show($"Your pickup location has been set to:\n{address}",
                     "Location Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                DisplayPassengerOnMap();
-
-                // Refresh passenger details
-                await LoadPassengerDataAsync();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error updating location: {ex.Message}",
-                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                // Reset cursor
-                Cursor = Cursors.Default;
-            }
+            });
         }
 
-
-        // Updated UpdateAssignmentDetailsText method to display pickup time
-        private void UpdateAssignmentDetailsText()
+        public void ShowRideRequestMessage()
         {
-            if (assignmentDetailsTextBox == null) return;
-
-            assignmentDetailsTextBox.Clear();
-
-            if (passenger == null)
-            {
-                assignmentDetailsTextBox.AppendText("No passenger profile found.\n");
-                assignmentDetailsTextBox.AppendText("Please set your pickup location first.");
-                return;
-            }
-
-            try
-            {
-                assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                assignmentDetailsTextBox.AppendText("Your Information:\n");
-                assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-                assignmentDetailsTextBox.AppendText($"Name: {passenger.Name}\n");
-
-                if (!string.IsNullOrEmpty(passenger.Address))
-                    assignmentDetailsTextBox.AppendText($"Pickup Location: {passenger.Address}\n\n");
-                else
-                    assignmentDetailsTextBox.AppendText($"Pickup Location: ({passenger.Latitude:F6}, {passenger.Longitude:F6})\n\n");
-
-                if (assignedVehicle != null)
-                {
-                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                    assignmentDetailsTextBox.AppendText("Your Scheduled Ride:\n");
-                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-
-                    string driverName = !string.IsNullOrEmpty(assignedVehicle.DriverName)
-                        ? assignedVehicle.DriverName
-                        : $"Driver #{assignedVehicle.Id}";
-
-                    assignmentDetailsTextBox.AppendText($"Driver: {driverName}\n");
-
-                    // Only add vehicle details if they are available
-                    if (!string.IsNullOrEmpty(assignedVehicle.Model))
-                        assignmentDetailsTextBox.AppendText($"Vehicle: {assignedVehicle.Model}\n");
-
-                    if (!string.IsNullOrEmpty(assignedVehicle.Color))
-                        assignmentDetailsTextBox.AppendText($"Color: {assignedVehicle.Color}\n");
-
-                    if (!string.IsNullOrEmpty(assignedVehicle.LicensePlate))
-                        assignmentDetailsTextBox.AppendText($"License Plate: {assignedVehicle.LicensePlate}\n");
-
-                    // Show pickup time from passenger object first (this comes from algorithm calculation)
-                    if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
-                    {
-                        assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                        assignmentDetailsTextBox.AppendText($"Pickup Time: {passenger.EstimatedPickupTime}\n");
-                        assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-                    }
-                    // Fall back to pickupTime from database if EstimatedPickupTime is not set
-                    else if (pickupTime.HasValue)
-                    {
-                        assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                        assignmentDetailsTextBox.AppendText($"Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
-                        assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-                    }
-                    else
-                    {
-                        assignmentDetailsTextBox.AppendText("Pickup Time: Not yet scheduled\n");
-                    }
-
-                    if (!string.IsNullOrEmpty(assignedVehicle.StartAddress))
-                    {
-                        assignmentDetailsTextBox.AppendText($"Driver Starting From: {assignedVehicle.StartAddress}\n");
-                    }
-                }
-                else
-                {
-                    assignmentDetailsTextBox.SelectionFont = new Font(assignmentDetailsTextBox.Font, FontStyle.Bold);
-                    assignmentDetailsTextBox.AppendText("No Ride Scheduled Yet\n");
-                    assignmentDetailsTextBox.SelectionFont = assignmentDetailsTextBox.Font;
-                    assignmentDetailsTextBox.AppendText("Rides for tomorrow will be assigned by the system overnight.\n");
-                    assignmentDetailsTextBox.AppendText("Please check back tomorrow morning for your ride details.\n");
-                }
-            }
-            catch (Exception ex)
-            {
-                assignmentDetailsTextBox.Clear();
-                assignmentDetailsTextBox.AppendText($"Error displaying information: {ex.Message}");
-            }
+            InvokeOnUIThread(() => {
+                MessageBox.Show("Your ride request has been submitted. A driver will be assigned soon.",
+                    "Status Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            });
         }
 
-        // Updated LoadPassengerDataAsync to get the complete passenger details with EstimatedPickupTime
-        private async Task LoadPassengerDataAsync()
+        public void UpdateAvailabilityControl(bool isAvailable)
         {
-            refreshButton.Enabled = false;
-            assignmentDetailsTextBox.Clear();
-            assignmentDetailsTextBox.AppendText("Loading ride details...\n");
+            InvokeOnUIThread(() => {
+                _availabilityCheckBox.CheckedChanged -= (s, e) =>
+                    AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
 
-            try
-            {
-                // Load passenger data
-                passenger = await dbService.GetPassengerByUserIdAsync(userId);
+                _availabilityCheckBox.Checked = isAvailable;
 
-                if (passenger != null)
-                {
-                    // Update UI to reflect passenger data
-                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
-
-                    // Try to load assigned vehicle if available
-                    var assignment = await dbService.GetPassengerAssignmentAsync(userId, DateTime.Now.ToString("yyyy-MM-dd"));
-                    assignedVehicle = assignment.AssignedVehicle;
-                    pickupTime = assignment.PickupTime;
-
-                    // Get the full passenger details including the estimated pickup time
-                    if (passenger.Id > 0)
-                    {
-                        var fullPassenger = await dbService.GetPassengerByIdAsync(passenger.Id);
-                        if (fullPassenger != null && !string.IsNullOrEmpty(fullPassenger.EstimatedPickupTime))
-                        {
-                            passenger.EstimatedPickupTime = fullPassenger.EstimatedPickupTime;
-                        }
-                    }
-
-                    // Display data on map and in text
-                    DisplayPassengerOnMap();
-                    UpdateAssignmentDetailsText();
-                }
-                else
-                {
-                    assignmentDetailsTextBox.Clear();
-                    assignmentDetailsTextBox.AppendText("No passenger profile found. Set your location to create a profile.\n");
-                }
-            }
-            catch (Exception ex)
-            {
-                assignmentDetailsTextBox.Clear();
-                assignmentDetailsTextBox.AppendText($"Error loading data: {ex.Message}\n");
-            }
-            finally
-            {
-                refreshButton.Enabled = true;
-            }
+                _availabilityCheckBox.CheckedChanged += (s, e) =>
+                    AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
+            });
         }
 
-        // Updated DisplayPassengerOnMap to show routes
-        private void DisplayPassengerOnMap()
+        public void ShowLocationSelectionInstructions(bool visible)
         {
-            if (passenger == null) return;
-
-            gMapControl.Overlays.Clear();
-
-            var passengersOverlay = new GMapOverlay("passengers");
-
-            // Create passenger marker
-            var marker = MapOverlays.CreatePassengerMarker(passenger);
-            passengersOverlay.Markers.Add(marker);
-
-            gMapControl.Overlays.Add(passengersOverlay);
-
-            // Create destination marker if there's an assigned vehicle
-            if (assignedVehicle != null)
-            {
-                // Get destination
-                Task.Run(async () => {
-                    var destination = await dbService.GetDestinationAsync();
-                    this.Invoke(new Action(() => {
-                        try
-                        {
-                            // Create destination marker
-                            var destinationOverlay = new GMapOverlay("destination");
-                            var destinationMarker = MapOverlays.CreateDestinationMarker(destination.Latitude, destination.Longitude);
-                            destinationOverlay.Markers.Add(destinationMarker);
-                            gMapControl.Overlays.Add(destinationOverlay);
-
-                            gMapControl.Refresh();
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"Error creating destination marker: {ex.Message}");
-                        }
-                    }));
-                });
-            }
-
-            // Position map on passenger location
-            gMapControl.Position = new PointLatLng(passenger.Latitude, passenger.Longitude);
-            gMapControl.Zoom = 15;
-            gMapControl.Refresh();
-        }
-        private async Task UpdateAvailabilityAsync()
-        {
-            if (passenger == null)
-                return;
-
-            try
-            {
-                bool success = await dbService.UpdatePassengerAvailabilityAsync(passenger.Id, availabilityCheckBox.Checked);
-
-                if (success)
-                {
-                    passenger.IsAvailableTomorrow = availabilityCheckBox.Checked;
-
-                    // If now available and not assigned, show message
-                    if (passenger.IsAvailableTomorrow && assignedVehicle == null)
-                    {
-                        MessageBox.Show("Your ride request has been submitted. A driver will be assigned soon.",
-                            "Status Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-
-                    // Refresh UI to reflect change
-                    UpdateAssignmentDetailsText();
-                }
-                else
-                {
-                    MessageBox.Show("Failed to update availability. Please try again.",
-                        "Update Failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-
-                    // Revert checkbox to match database state
-                    availabilityCheckBox.CheckedChanged -= async (s, e) => await UpdateAvailabilityAsync();
-                    availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
-                    availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error updating availability: {ex.Message}",
-                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
-                // Revert checkbox to match database state
-                availabilityCheckBox.CheckedChanged -= async (s, e) => await UpdateAvailabilityAsync();
-                availabilityCheckBox.Checked = passenger.IsAvailableTomorrow;
-                availabilityCheckBox.CheckedChanged += async (s, e) => await UpdateAvailabilityAsync();
-            }
+            InvokeOnUIThread(() => {
+                _instructionsLabel.Visible = visible;
+            });
         }
 
-        private void PassengerForm_Load(object sender, EventArgs e)
+        public void SetSearchControlsEnabled(bool enabled)
         {
-            // Initialization code for PassengerForm
-            try
+            InvokeOnUIThread(() => {
+                _addressTextBox.Enabled = enabled;
+                _searchButton.Enabled = enabled;
+                _parentForm.Cursor = enabled ? Cursors.Default : Cursors.WaitCursor;
+            });
+        }
+
+        public void ShowBusyState(bool busy)
+        {
+            InvokeOnUIThread(() => {
+                _parentForm.Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
+            });
+        }
+
+        public GMapControl GetMapControl()
+        {
+            return _mapControl;
+        }
+
+        /// <summary>
+        /// Ensures that the provided action runs on the UI thread
+        /// </summary>
+        private void InvokeOnUIThread(Action action)
+        {
+            if (_parentForm.InvokeRequired)
             {
-                if (gMapControl != null)
+                try
                 {
-                    gMapControl.Position = new PointLatLng(32.0741, 34.7922); // Default to Tel Aviv
-                    gMapControl.Zoom = 12;
+                    _parentForm.Invoke(action);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Form may have been closed
+                }
+                catch (InvalidOperationException)
+                {
+                    // Handle case where form handle isn't created yet
                 }
             }
-            catch (Exception ex)
+            else
             {
-                MessageBox.Show($"Error initializing map: {ex.Message}", "Initialization Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                action();
             }
+        }
+    }
+
+    /// <summary>
+    /// Custom exception for data operations
+    /// </summary>
+    public class DataException : Exception
+    {
+        public DataException(string message) : base(message)
+        {
+        }
+
+        public DataException(string message, Exception innerException) : base(message, innerException)
+        {
         }
     }
 }

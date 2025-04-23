@@ -1,115 +1,452 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.Common;
 using System.Data.SQLite;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using RideMatchProject.Models;
 
 namespace RideMatchProject.Services
 {
-    public class DatabaseService : IDisposable
+    /// <summary>
+    /// Base database manager class that handles connection and shared functionality
+    /// </summary>
+    public class DatabaseManager : IDisposable
     {
-        private readonly string connectionString;
-        private SQLiteConnection connection;
-        private bool disposed = false;
+        protected readonly string _connectionString;
+        protected SQLiteConnection _connection;
+        private bool _disposed = false;
 
-        /// <summary>
-        /// Creates a new database service with the given database file
-        /// </summary>
-        public DatabaseService(string dbFilePath = "ridematch.db")
+        public DatabaseManager(string dbFilePath = "ridematch.db")
         {
             bool createNew = !File.Exists(dbFilePath);
-            connectionString = $"Data Source={dbFilePath};Version=3;";
+            _connectionString = $"Data Source={dbFilePath};Version=3;";
 
-            // Create and open the connection
-            connection = new SQLiteConnection(connectionString);
-            connection.Open();
+            InitializeConnection();
 
             if (createNew)
             {
-                CreateDatabase();
+                CreateDatabaseSchema();
             }
             else
             {
-                // Check if we need to update the schema
-                UpdateDatabaseSchemaIfNeeded();
+                UpdateDatabaseSchema();
             }
         }
 
-        /// <summary>
-        /// Gets the SQLite connection for direct queries
-        /// </summary>
-        public SQLiteConnection GetConnection()
+        private void InitializeConnection()
         {
-            return connection;
+            _connection = new SQLiteConnection(_connectionString);
+            _connection.Open();
         }
 
-        /// <summary>
-        /// Creates the database schema if it doesn't exist
-        /// </summary>
-        private void CreateDatabase()
+        public SQLiteConnection GetConnection()
         {
-            using (var cmd = new SQLiteCommand(connection))
+            return _connection;
+        }
+
+        private void CreateDatabaseSchema()
+        {
+            var schemaCreator = new DatabaseSchemaCreator(_connection);
+            schemaCreator.CreateSchema();
+
+            var defaultDataInserter = new DefaultDataInserter(_connection);
+            defaultDataInserter.InsertDefaultData();
+        }
+
+        private void UpdateDatabaseSchema()
+        {
+            var schemaUpdater = new DatabaseSchemaUpdater(_connection);
+            schemaUpdater.UpdateSchema();
+        }
+
+        public async Task<T> ExecuteScalarAsync<T>(string commandText,
+            Dictionary<string, object> parameters = null)
+        {
+            using (var cmd = CreateCommand(commandText, parameters))
             {
-                // Create Users table (for authentication)
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS Users (
-                        UserID INTEGER PRIMARY KEY AUTOINCREMENT,
-                        Username TEXT NOT NULL UNIQUE,
-                        Password TEXT NOT NULL,
-                        UserType TEXT NOT NULL,
-                        Name TEXT NOT NULL,
-                        Email TEXT,
-                        Phone TEXT,
-                        CreatedDate TEXT DEFAULT CURRENT_TIMESTAMP
-                    )";
-                cmd.ExecuteNonQuery();
+                var result = await cmd.ExecuteScalarAsync();
+                if (result == null || result == DBNull.Value)
+                {
+                    return default;
+                }
+                return (T)Convert.ChangeType(result, typeof(T));
+            }
+        }
 
-                // Create Vehicles table with UserId foreign key and DepartureTime
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS Vehicles (
-                        VehicleID INTEGER PRIMARY KEY AUTOINCREMENT,
-                        UserID INTEGER NOT NULL UNIQUE,  -- UNIQUE constraint ensures one-to-one relationship
-                        Capacity INTEGER NOT NULL DEFAULT 4,
-                        StartLatitude REAL NOT NULL DEFAULT 0,
-                        StartLongitude REAL NOT NULL DEFAULT 0,
-                        StartAddress TEXT,
-                        IsAvailableTomorrow INTEGER DEFAULT 1,
-                        DepartureTime TEXT,
-                        FOREIGN KEY (UserID) REFERENCES Users(UserID)
-                    )";
-                cmd.ExecuteNonQuery();
+        public async Task<int> ExecuteNonQueryAsync(string commandText,
+            Dictionary<string, object> parameters = null)
+        {
+            using (var cmd = CreateCommand(commandText, parameters))
+            {
+                return await cmd.ExecuteNonQueryAsync();
+            }
+        }
 
-                // Create Passengers table with EstimatedPickupTime
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS Passengers (
-                        PassengerID INTEGER PRIMARY KEY AUTOINCREMENT,
-                        UserID INTEGER,
-                        Name TEXT NOT NULL,
-                        Latitude REAL NOT NULL,
-                        Longitude REAL NOT NULL,
-                        Address TEXT,
-                        IsAvailableTomorrow INTEGER DEFAULT 1,
-                        EstimatedPickupTime TEXT,
-                        FOREIGN KEY (UserID) REFERENCES Users(UserID)
-                    )";
-                cmd.ExecuteNonQuery();
+        protected SQLiteCommand CreateCommand(string commandText,
+            Dictionary<string, object> parameters = null)
+        {
+            var cmd = new SQLiteCommand(commandText, _connection);
 
-                // Create Destination table
-                cmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS Destination (
-                        DestinationID INTEGER PRIMARY KEY AUTOINCREMENT,
-                        Name TEXT NOT NULL,
-                        Latitude REAL NOT NULL,
-                        Longitude REAL NOT NULL,
-                        Address TEXT,
-                        TargetArrivalTime TEXT NOT NULL
-                    )";
-                cmd.ExecuteNonQuery();
+            if (parameters != null)
+            {
+                foreach (var param in parameters)
+                {
+                    cmd.Parameters.AddWithValue(param.Key, param.Value ?? DBNull.Value);
+                }
+            }
 
-                // Create Routes table for storing generated solutions
+            return cmd;
+        }
+
+        public async Task<List<T>> ExecuteReaderAsync<T>(string commandText,
+            Func<DbDataReader, Task<T>> rowMapper, Dictionary<string, object> parameters = null)
+        {
+            var results = new List<T>();
+
+            using (var cmd = CreateCommand(commandText, parameters))
+            {
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        var item = await rowMapper(reader);
+                        results.Add(item);
+                    }
+                }
+            }
+
+            return results;
+        }
+
+        public async Task<T> ExecuteReaderSingleAsync<T>(string commandText,
+            Func<DbDataReader, Task<T>> rowMapper, Dictionary<string, object> parameters = null)
+        {
+            using (var cmd = CreateCommand(commandText, parameters))
+            {
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        return await rowMapper(reader);
+                    }
+                }
+            }
+
+            return default;
+        }
+
+        protected async Task<bool> TableExistsAsync(string tableName)
+        {
+            string query = "SELECT name FROM sqlite_master WHERE type='table' AND name=@TableName";
+            var parameters = new Dictionary<string, object> { { "@TableName", tableName } };
+
+            var result = await ExecuteScalarAsync<string>(query, parameters);
+            return !string.IsNullOrEmpty(result);
+        }
+
+        protected async Task<bool> ColumnExistsAsync(string tableName, string columnName)
+        {
+            string query = $"PRAGMA table_info({tableName})";
+
+            var columnExists = await ExecuteReaderAsync<bool>(
+                query,
+                async reader => reader.GetString(1) == columnName,
+                null
+            );
+
+            return columnExists.Any(exists => exists);
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    _connection?.Close();
+                    _connection?.Dispose();
+                }
+                _disposed = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Creates database schema for new databases
+    /// </summary>
+    public class DatabaseSchemaCreator
+    {
+        private readonly SQLiteConnection _connection;
+
+        public DatabaseSchemaCreator(SQLiteConnection connection)
+        {
+            _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+        }
+
+        public void CreateSchema()
+        {
+            using (var transaction = _connection.BeginTransaction())
+            {
+                try
+                {
+                    CreateUserTables();
+                    CreateVehicleTable();
+                    CreatePassengerTable();
+                    CreateDestinationTable();
+                    CreateRouteAndAssignmentTables();
+                    CreateSettingsAndLogTables();
+
+                    transaction.Commit();
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+        }
+
+        private void CreateUserTables()
+        {
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS Users (
+                    UserID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Username TEXT NOT NULL UNIQUE,
+                    Password TEXT NOT NULL,
+                    UserType TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    Email TEXT,
+                    Phone TEXT,
+                    CreatedDate TEXT DEFAULT CURRENT_TIMESTAMP
+                )");
+        }
+
+        private void CreateVehicleTable()
+        {
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS Vehicles (
+                    VehicleID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UserID INTEGER NOT NULL UNIQUE,
+                    Capacity INTEGER NOT NULL DEFAULT 4,
+                    StartLatitude REAL NOT NULL DEFAULT 0,
+                    StartLongitude REAL NOT NULL DEFAULT 0,
+                    StartAddress TEXT,
+                    IsAvailableTomorrow INTEGER DEFAULT 1,
+                    DepartureTime TEXT,
+                    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+                )");
+        }
+
+        private void CreatePassengerTable()
+        {
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS Passengers (
+                    PassengerID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UserID INTEGER,
+                    Name TEXT NOT NULL,
+                    Latitude REAL NOT NULL,
+                    Longitude REAL NOT NULL,
+                    Address TEXT,
+                    IsAvailableTomorrow INTEGER DEFAULT 1,
+                    EstimatedPickupTime TEXT,
+                    FOREIGN KEY (UserID) REFERENCES Users(UserID)
+                )");
+        }
+
+        private void CreateDestinationTable()
+        {
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS Destination (
+                    DestinationID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Name TEXT NOT NULL,
+                    Latitude REAL NOT NULL,
+                    Longitude REAL NOT NULL,
+                    Address TEXT,
+                    TargetArrivalTime TEXT NOT NULL
+                )");
+        }
+
+        private void CreateRouteAndAssignmentTables()
+        {
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS Routes (
+                    RouteID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    SolutionDate TEXT NOT NULL,
+                    GeneratedTime TEXT DEFAULT CURRENT_TIMESTAMP
+                )");
+
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS RouteDetails (
+                    RouteDetailID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    RouteID INTEGER NOT NULL,
+                    VehicleID INTEGER NOT NULL,
+                    TotalDistance REAL NOT NULL,
+                    TotalTime REAL NOT NULL,
+                    DepartureTime TEXT,
+                    FOREIGN KEY (RouteID) REFERENCES Routes(RouteID),
+                    FOREIGN KEY (VehicleID) REFERENCES Vehicles(VehicleID)
+                )");
+
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS PassengerAssignments (
+                    AssignmentID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    RouteDetailID INTEGER NOT NULL,
+                    PassengerID INTEGER NOT NULL,
+                    StopOrder INTEGER NOT NULL,
+                    EstimatedPickupTime TEXT,
+                    FOREIGN KEY (RouteDetailID) REFERENCES RouteDetails(RouteDetailID),
+                    FOREIGN KEY (PassengerID) REFERENCES Passengers(PassengerID)
+                )");
+        }
+
+        private void CreateSettingsAndLogTables()
+        {
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS Settings (
+                    SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    SettingName TEXT NOT NULL UNIQUE,
+                    SettingValue TEXT NOT NULL
+                )");
+
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS SchedulingLog (
+                    LogID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    RunTime TEXT NOT NULL,
+                    Status TEXT NOT NULL,
+                    RoutesGenerated INTEGER,
+                    PassengersAssigned INTEGER,
+                    ErrorMessage TEXT
+                )");
+        }
+
+        private void ExecuteNonQuery(string commandText)
+        {
+            using (var cmd = new SQLiteCommand(commandText, _connection))
+            {
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Inserts default data into the database
+    /// </summary>
+    public class DefaultDataInserter
+    {
+        private readonly SQLiteConnection _connection;
+        private readonly SecurityHelper _securityHelper;
+
+        public DefaultDataInserter(SQLiteConnection connection)
+        {
+            _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+            _securityHelper = new SecurityHelper();
+        }
+
+        public void InsertDefaultData()
+        {
+            InsertDefaultAdmin();
+            InsertDefaultDestination();
+        }
+
+        private void InsertDefaultAdmin()
+        {
+            using (var cmd = new SQLiteCommand(_connection))
+            {
+                cmd.CommandText = @"
+                    INSERT INTO Users (Username, Password, UserType, Name)
+                    VALUES (@Username, @Password, @UserType, @Name)";
+                cmd.Parameters.AddWithValue("@Username", "admin");
+                cmd.Parameters.AddWithValue("@Password", _securityHelper.HashPassword("admin"));
+                cmd.Parameters.AddWithValue("@UserType", "Admin");
+                cmd.Parameters.AddWithValue("@Name", "Administrator");
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        private void InsertDefaultDestination()
+        {
+            using (var cmd = new SQLiteCommand(_connection))
+            {
+                cmd.CommandText = @"
+                    INSERT INTO Destination (Name, Latitude, Longitude, TargetArrivalTime)
+                    VALUES (@Name, @Latitude, @Longitude, @TargetArrivalTime)";
+                cmd.Parameters.AddWithValue("@Name", "School");
+                cmd.Parameters.AddWithValue("@Latitude", 32.0741);
+                cmd.Parameters.AddWithValue("@Longitude", 34.7922);
+                cmd.Parameters.AddWithValue("@TargetArrivalTime", "08:00:00");
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Updates database schema for existing databases
+    /// </summary>
+    public class DatabaseSchemaUpdater
+    {
+        private readonly SQLiteConnection _connection;
+
+        public DatabaseSchemaUpdater(SQLiteConnection connection)
+        {
+            _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+        }
+
+        public void UpdateSchema()
+        {
+            EnsureRouteTablesExist();
+            EnsureSettingsTablesExist();
+            AddMissingColumns();
+        }
+
+        private void EnsureRouteTablesExist()
+        {
+            if (!TableExists("Routes"))
+            {
+                CreateRouteTables();
+            }
+        }
+
+        private void EnsureSettingsTablesExist()
+        {
+            if (!TableExists("Settings"))
+            {
+                CreateSettingsTables();
+            }
+        }
+
+        private void AddMissingColumns()
+        {
+            AddColumnIfNotExists("RouteDetails", "DepartureTime", "TEXT");
+            AddColumnIfNotExists("Vehicles", "DepartureTime", "TEXT");
+            AddColumnIfNotExists("Passengers", "EstimatedPickupTime", "TEXT");
+        }
+
+        private bool TableExists(string tableName)
+        {
+            using (var cmd = new SQLiteCommand(_connection))
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name=@TableName";
+                cmd.Parameters.AddWithValue("@TableName", tableName);
+                var result = cmd.ExecuteScalar();
+                return result != null;
+            }
+        }
+
+        private void CreateRouteTables()
+        {
+            using (var cmd = new SQLiteCommand(_connection))
+            {
                 cmd.CommandText = @"
                     CREATE TABLE IF NOT EXISTS Routes (
                         RouteID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,7 +455,6 @@ namespace RideMatchProject.Services
                     )";
                 cmd.ExecuteNonQuery();
 
-                // Create RouteDetails table for storing vehicle assignments with DepartureTime
                 cmd.CommandText = @"
                     CREATE TABLE IF NOT EXISTS RouteDetails (
                         RouteDetailID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,7 +468,6 @@ namespace RideMatchProject.Services
                     )";
                 cmd.ExecuteNonQuery();
 
-                // Create PassengerAssignments table with EstimatedPickupTime
                 cmd.CommandText = @"
                     CREATE TABLE IF NOT EXISTS PassengerAssignments (
                         AssignmentID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,8 +479,13 @@ namespace RideMatchProject.Services
                         FOREIGN KEY (PassengerID) REFERENCES Passengers(PassengerID)
                     )";
                 cmd.ExecuteNonQuery();
+            }
+        }
 
-                // Create Settings table
+        private void CreateSettingsTables()
+        {
+            using (var cmd = new SQLiteCommand(_connection))
+            {
                 cmd.CommandText = @"
                     CREATE TABLE IF NOT EXISTS Settings (
                         SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,7 +494,6 @@ namespace RideMatchProject.Services
                     )";
                 cmd.ExecuteNonQuery();
 
-                // Create SchedulingLog table
                 cmd.CommandText = @"
                     CREATE TABLE IF NOT EXISTS SchedulingLog (
                         LogID INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -165,186 +504,119 @@ namespace RideMatchProject.Services
                         ErrorMessage TEXT
                     )";
                 cmd.ExecuteNonQuery();
+            }
+        }
 
-                // Create an admin user by default
-                cmd.CommandText = @"
-                    INSERT INTO Users (Username, Password, UserType, Name)
-                    VALUES (@Username, @Password, @UserType, @Name)";
-                cmd.Parameters.AddWithValue("@Username", "admin");
-                cmd.Parameters.AddWithValue("@Password", HashPassword("admin")); // In production, use proper password hashing
-                cmd.Parameters.AddWithValue("@UserType", "Admin");
-                cmd.Parameters.AddWithValue("@Name", "Administrator");
-                cmd.ExecuteNonQuery();
+        private void AddColumnIfNotExists(string tableName, string columnName, string columnType)
+        {
+            if (ColumnExists(tableName, columnName))
+            {
+                return;
+            }
 
-                // Insert default destination
-                cmd.Parameters.Clear();
-                cmd.CommandText = @"
-                    INSERT INTO Destination (Name, Latitude, Longitude, TargetArrivalTime)
-                    VALUES (@Name, @Latitude, @Longitude, @TargetArrivalTime)";
-                cmd.Parameters.AddWithValue("@Name", "School");
-                cmd.Parameters.AddWithValue("@Latitude", 32.0741);
-                cmd.Parameters.AddWithValue("@Longitude", 34.7922);
-                cmd.Parameters.AddWithValue("@TargetArrivalTime", "08:00:00");
+            using (var cmd = new SQLiteCommand(_connection))
+            {
+                cmd.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnType}";
                 cmd.ExecuteNonQuery();
             }
         }
 
-        /// <summary>
-        /// Updates the database schema if needed for older databases
-        /// </summary>
-        private void UpdateDatabaseSchemaIfNeeded()
+        private bool ColumnExists(string tableName, string columnName)
         {
-            using (var cmd = new SQLiteCommand(connection))
+            using (var cmd = new SQLiteCommand(_connection))
             {
-                // Check if RouteDetails table has DepartureTime column
-                bool routeDetailsDepartureTimeExists = false;
-                cmd.CommandText = "PRAGMA table_info(RouteDetails)";
+                cmd.CommandText = $"PRAGMA table_info({tableName})";
                 using (var reader = cmd.ExecuteReader())
                 {
                     while (reader.Read())
                     {
-                        if (reader["name"].ToString() == "DepartureTime")
+                        if (reader["name"].ToString() == columnName)
                         {
-                            routeDetailsDepartureTimeExists = true;
-                            break;
+                            return true;
                         }
-                    }
-                }
-
-                // Add DepartureTime column to RouteDetails if it doesn't exist
-                if (!routeDetailsDepartureTimeExists)
-                {
-                    cmd.CommandText = "ALTER TABLE RouteDetails ADD COLUMN DepartureTime TEXT";
-                    cmd.ExecuteNonQuery();
-                }
-
-                // Check if Vehicles table has DepartureTime column
-                bool vehiclesDepartureTimeExists = false;
-                cmd.CommandText = "PRAGMA table_info(Vehicles)";
-                using (var reader = cmd.ExecuteReader())
-                {
-                    while (reader.Read())
-                    {
-                        if (reader["name"].ToString() == "DepartureTime")
-                        {
-                            vehiclesDepartureTimeExists = true;
-                            break;
-                        }
-                    }
-                }
-
-                // Add DepartureTime column to Vehicles if it doesn't exist
-                if (!vehiclesDepartureTimeExists)
-                {
-                    cmd.CommandText = "ALTER TABLE Vehicles ADD COLUMN DepartureTime TEXT";
-                    cmd.ExecuteNonQuery();
-                }
-
-                // Check if Passengers table has EstimatedPickupTime column
-                bool passengersPickupTimeExists = false;
-                cmd.CommandText = "PRAGMA table_info(Passengers)";
-                using (var reader = cmd.ExecuteReader())
-                {
-                    while (reader.Read())
-                    {
-                        if (reader["name"].ToString() == "EstimatedPickupTime")
-                        {
-                            passengersPickupTimeExists = true;
-                            break;
-                        }
-                    }
-                }
-
-                // Add EstimatedPickupTime column to Passengers if it doesn't exist
-                if (!passengersPickupTimeExists)
-                {
-                    cmd.CommandText = "ALTER TABLE Passengers ADD COLUMN EstimatedPickupTime TEXT";
-                    cmd.ExecuteNonQuery();
-                }
-            }
-        }
-        #region User Methods
-
-        /// <summary>
-        /// Authenticates a user with the given username and password
-        /// </summary>
-        public async Task<(bool Success, string UserType, int UserId)> AuthenticateUserAsync(string username, string password)
-        {
-            string hashedPassword = HashPassword(password);
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT UserID, UserType FROM Users WHERE Username = @Username AND Password = @Password";
-                cmd.Parameters.AddWithValue("@Username", username);
-                cmd.Parameters.AddWithValue("@Password", hashedPassword);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        int userId = reader.GetInt32(0);
-                        string userType = reader.GetString(1);
-                        return (true, userType, userId);
                     }
                 }
             }
 
-            return (false, "", 0);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Security helper for password hashing
+    /// </summary>
+    public class SecurityHelper
+    {
+        public string HashPassword(string password)
+        {
+            using (var sha = SHA256.Create())
+            {
+                var bytes = Encoding.UTF8.GetBytes(password);
+                var hash = sha.ComputeHash(bytes);
+                return Convert.ToBase64String(hash);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Service for user-related database operations
+    /// </summary>
+    public class UserService
+    {
+        private readonly DatabaseManager _dbManager;
+        private readonly SQLiteConnection _connection;
+        private readonly SecurityHelper _securityHelper;
+
+        public UserService(DatabaseManager dbManager)
+        {
+            _dbManager = dbManager ?? throw new ArgumentNullException(nameof(dbManager));
+            _connection = dbManager.GetConnection();
+            _securityHelper = new SecurityHelper();
         }
 
-        /// <summary>
-        /// Creates a new user in the database
-        /// </summary>
-        public async Task<int> AddUserAsync(string username, string password, string userType, string name, string email = "", string phone = "")
+        public async Task<(bool Success, string UserType, int UserId)> AuthenticateUserAsync(
+            string username, string password)
         {
-            using (var transaction = connection.BeginTransaction())
+            string hashedPassword = _securityHelper.HashPassword(password);
+
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Username", username },
+                { "@Password", hashedPassword }
+            };
+
+            string query = @"
+                SELECT UserID, UserType 
+                FROM Users 
+                WHERE Username = @Username AND Password = @Password";
+
+            var result = await _dbManager.ExecuteReaderSingleAsync<(bool, string, int)>(
+                query,
+                async reader => (true, reader.GetString(1), reader.GetInt32(0)),
+                parameters
+            );
+
+            return result.Item1 ? result : (false, "", 0);
+        }
+
+        public async Task<int> AddUserAsync(string username, string password,
+            string userType, string name, string email = "", string phone = "")
+        {
+            using (var transaction = _connection.BeginTransaction())
             {
                 try
                 {
-                    int userId;
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = @"
-                    INSERT INTO Users (Username, Password, UserType, Name, Email, Phone)
-                    VALUES (@Username, @Password, @UserType, @Name, @Email, @Phone);
-                    SELECT last_insert_rowid();";
-                        cmd.Parameters.AddWithValue("@Username", username);
-                        cmd.Parameters.AddWithValue("@Password", HashPassword(password));
-                        cmd.Parameters.AddWithValue("@UserType", userType);
-                        cmd.Parameters.AddWithValue("@Name", name);
-                        cmd.Parameters.AddWithValue("@Email", email ?? "");
-                        cmd.Parameters.AddWithValue("@Phone", phone ?? "");
+                    int userId = await InsertUserAsync(username, password, userType, name, email, phone, transaction);
 
-                        object result = await cmd.ExecuteScalarAsync();
-                        if (result == null || !int.TryParse(result.ToString(), out userId))
-                        {
-                            transaction.Rollback();
-                            return -1;
-                        }
-                    }
-
-                    // If user is a driver, automatically create a vehicle for them
-                    if (userType.ToLower() == "driver" && userId > 0)
+                    if (userId > 0 && userType.ToLower() == "driver")
                     {
-                        using (var vehicleCmd = new SQLiteCommand(connection))
-                        {
-                            vehicleCmd.Transaction = transaction;
-                            vehicleCmd.CommandText = @"
-                        INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, IsAvailableTomorrow)
-                        VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, 1)";
-                            vehicleCmd.Parameters.AddWithValue("@UserID", userId);
-                            vehicleCmd.Parameters.AddWithValue("@Capacity", 4); // Default capacity
-                            vehicleCmd.Parameters.AddWithValue("@StartLatitude", 0);
-                            vehicleCmd.Parameters.AddWithValue("@StartLongitude", 0);
-                            await vehicleCmd.ExecuteNonQueryAsync();
-                        }
+                        await CreateDefaultVehicleAsync(userId, transaction);
                     }
 
                     transaction.Commit();
                     return userId;
                 }
-                catch (Exception)
+                catch
                 {
                     transaction.Rollback();
                     throw;
@@ -352,1247 +624,1146 @@ namespace RideMatchProject.Services
             }
         }
 
-        /// <summary>
-        /// Updates user information
-        /// </summary>
+        private async Task<int> InsertUserAsync(string username, string password,
+            string userType, string name, string email, string phone, SQLiteTransaction transaction)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Username", username },
+                { "@Password", _securityHelper.HashPassword(password) },
+                { "@UserType", userType },
+                { "@Name", name },
+                { "@Email", email ?? "" },
+                { "@Phone", phone ?? "" }
+            };
+
+            string query = @"
+                INSERT INTO Users (Username, Password, UserType, Name, Email, Phone)
+                VALUES (@Username, @Password, @UserType, @Name, @Email, @Phone);
+                SELECT last_insert_rowid();";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                foreach (var param in parameters)
+                {
+                    cmd.Parameters.AddWithValue(param.Key, param.Value);
+                }
+
+                object result = await cmd.ExecuteScalarAsync();
+                if (result != null && int.TryParse(result.ToString(), out int userId))
+                {
+                    return userId;
+                }
+            }
+
+            return -1;
+        }
+
+        private async Task CreateDefaultVehicleAsync(int userId, SQLiteTransaction transaction)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@UserID", userId },
+                { "@Capacity", 4 },
+                { "@StartLatitude", 0 },
+                { "@StartLongitude", 0 }
+            };
+
+            string query = @"
+                INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, IsAvailableTomorrow)
+                VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, 1)";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                foreach (var param in parameters)
+                {
+                    cmd.Parameters.AddWithValue(param.Key, param.Value);
+                }
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
         public async Task<bool> UpdateUserAsync(int userId, string name, string email, string phone)
         {
-            using (var cmd = new SQLiteCommand(connection))
+            var parameters = new Dictionary<string, object>
             {
-                cmd.CommandText = @"
-                    UPDATE Users
-                    SET Name = @Name, Email = @Email, Phone = @Phone
-                    WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Name", name);
-                cmd.Parameters.AddWithValue("@Email", email ?? "");
-                cmd.Parameters.AddWithValue("@Phone", phone ?? "");
+                { "@UserID", userId },
+                { "@Name", name },
+                { "@Email", email ?? "" },
+                { "@Phone", phone ?? "" }
+            };
 
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
+            string query = @"
+                UPDATE Users
+                SET Name = @Name, Email = @Email, Phone = @Phone
+                WHERE UserID = @UserID";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
         }
 
-        /// <summary>
-        /// Updates a user's profile information including user type
-        /// </summary>
-        public async Task<bool> UpdateUserProfileAsync(int userId, string userType, string name, string email, string phone)
+        public async Task<bool> UpdateUserProfileAsync(int userId, string userType,
+            string name, string email, string phone)
         {
-            using (var cmd = new SQLiteCommand(connection))
+            var parameters = new Dictionary<string, object>
             {
-                cmd.CommandText = @"
-                    UPDATE Users 
-                    SET UserType = @UserType, Name = @Name, Email = @Email, Phone = @Phone
-                    WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@UserType", userType);
-                cmd.Parameters.AddWithValue("@Name", name);
-                cmd.Parameters.AddWithValue("@Email", email ?? "");
-                cmd.Parameters.AddWithValue("@Phone", phone ?? "");
+                { "@UserID", userId },
+                { "@UserType", userType },
+                { "@Name", name },
+                { "@Email", email ?? "" },
+                { "@Phone", phone ?? "" }
+            };
 
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
+            string query = @"
+                UPDATE Users 
+                SET UserType = @UserType, Name = @Name, Email = @Email, Phone = @Phone
+                WHERE UserID = @UserID";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
         }
 
-        /// <summary>
-        /// Changes a user's password
-        /// </summary>
         public async Task<bool> ChangePasswordAsync(int userId, string newPassword)
         {
-            using (var cmd = new SQLiteCommand(connection))
+            var parameters = new Dictionary<string, object>
             {
-                cmd.CommandText = "UPDATE Users SET Password = @Password WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Password", HashPassword(newPassword));
+                { "@UserID", userId },
+                { "@Password", _securityHelper.HashPassword(newPassword) }
+            };
 
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
+            string query = "UPDATE Users SET Password = @Password WHERE UserID = @UserID";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
         }
 
-        /// <summary>
-        /// Gets user information by ID
-        /// </summary>
-        public async Task<(string Username, string UserType, string Name, string Email, string Phone)> GetUserInfoAsync(int userId)
+        public async Task<(string Username, string UserType, string Name, string Email, string Phone)>
+            GetUserInfoAsync(int userId)
         {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT Username, UserType, Name, Email, Phone FROM Users WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
+            var parameters = new Dictionary<string, object> { { "@UserID", userId } };
 
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        return (
-                            reader.GetString(0),
-                            reader.GetString(1),
-                            reader.GetString(2),
-                            reader.IsDBNull(3) ? "" : reader.GetString(3),
-                            reader.IsDBNull(4) ? "" : reader.GetString(4)
-                        );
-                    }
-                }
-            }
+            string query = @"
+                SELECT Username, UserType, Name, Email, Phone 
+                FROM Users 
+                WHERE UserID = @UserID";
 
-            return (null, null, null, null, null);
+            return await _dbManager.ExecuteReaderSingleAsync<(string, string, string, string, string)>(
+                query,
+                async reader => (
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.IsDBNull(3) ? "" : reader.GetString(3),
+                    reader.IsDBNull(4) ? "" : reader.GetString(4)
+                ),
+                parameters
+            );
         }
 
-        /// <summary>
-        /// Gets all users from the database
-        /// </summary>
-        public async Task<List<(int Id, string Username, string UserType, string Name, string Email, string Phone)>> GetAllUsersAsync()
+        public async Task<List<(int Id, string Username, string UserType, string Name, string Email, string Phone)>>
+            GetAllUsersAsync()
         {
-            var users = new List<(int Id, string Username, string UserType, string Name, string Email, string Phone)>();
+            string query = @"
+                SELECT UserID, Username, UserType, Name, Email, Phone 
+                FROM Users 
+                ORDER BY UserType, Username";
 
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT UserID, Username, UserType, Name, Email, Phone 
-                    FROM Users 
-                    ORDER BY UserType, Username";
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        users.Add((
-                            reader.GetInt32(0),
-                            reader.GetString(1),
-                            reader.GetString(2),
-                            reader.GetString(3),
-                            reader.IsDBNull(4) ? "" : reader.GetString(4),
-                            reader.IsDBNull(5) ? "" : reader.GetString(5)
-                        ));
-                    }
-                }
-            }
-
-            return users;
+            return await _dbManager.ExecuteReaderAsync<(int, string, string, string, string, string)>(
+                query,
+                async reader => (
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.IsDBNull(4) ? "" : reader.GetString(4),
+                    reader.IsDBNull(5) ? "" : reader.GetString(5)
+                ),
+                null
+            );
         }
 
-        /// <summary>
-        /// Deletes a user by ID
-        /// </summary>
         public async Task<bool> DeleteUserAsync(int userId)
         {
-            // Begin transaction to handle cascading deletes
-            using (var transaction = connection.BeginTransaction())
+            using (var transaction = _connection.BeginTransaction())
             {
                 try
                 {
-                    // Delete associated vehicle if exists
-                    using (var cmd = new SQLiteCommand(connection))
+                    await DeleteVehicleForUserAsync(userId, transaction);
+                    await DeletePassengerForUserAsync(userId, transaction);
+                    bool deleted = await DeleteUserRecordAsync(userId, transaction);
+
+                    if (deleted)
                     {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = "DELETE FROM Vehicles WHERE UserID = @UserID";
-                        cmd.Parameters.AddWithValue("@UserID", userId);
-                        await cmd.ExecuteNonQueryAsync();
-                    }
-
-                    // Delete associated passenger if exists
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = "DELETE FROM Passengers WHERE UserID = @UserID";
-                        cmd.Parameters.AddWithValue("@UserID", userId);
-                        await cmd.ExecuteNonQueryAsync();
-                    }
-
-                    // Delete the user
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = "DELETE FROM Users WHERE UserID = @UserID";
-                        cmd.Parameters.AddWithValue("@UserID", userId);
-                        int rowsAffected = await cmd.ExecuteNonQueryAsync();
-
-                        if (rowsAffected == 0)
-                        {
-                            // No user was deleted
-                            transaction.Rollback();
-                            return false;
-                        }
-                    }
-
-                    // Commit the transaction
-                    transaction.Commit();
-                    return true;
-                }
-                catch (Exception)
-                {
-                    // Rollback on error
-                    transaction.Rollback();
-                    throw;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Gets all users with a specific user type
-        /// </summary>
-        public async Task<List<(int Id, string Username, string Name)>> GetUsersByTypeAsync(string userType)
-        {
-            var users = new List<(int Id, string Username, string Name)>();
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT UserID, Username, Name
-                    FROM Users
-                    WHERE UserType = @UserType
-                    ORDER BY Username";
-                cmd.Parameters.AddWithValue("@UserType", userType);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        users.Add((
-                            reader.GetInt32(0),
-                            reader.GetString(1),
-                            reader.GetString(2)
-                        ));
-                    }
-                }
-            }
-
-            return users;
-        }
-
-        #endregion
-        #region Vehicle Methods
-
-        /// <summary>
-        /// Adds a new vehicle to the database
-        /// </summary>
-        public async Task<int> AddVehicleAsync(int userId, int capacity, double startLatitude, double startLongitude, string startAddress = "")
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, StartAddress)
-                    VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, @StartAddress);
-                    SELECT last_insert_rowid();";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Capacity", capacity);
-                cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
-                cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
-                cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
-
-                object result = await cmd.ExecuteScalarAsync();
-                if (result != null && int.TryParse(result.ToString(), out int vehicleId))
-                {
-                    return vehicleId;
-                }
-            }
-
-            return -1;
-        }
-
-        /// <summary>
-        /// Updates a vehicle's information
-        /// </summary>
-        public async Task<bool> UpdateVehicleAsync(int vehicleId, int capacity, double startLatitude, double startLongitude, string startAddress = "")
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    UPDATE Vehicles
-                    SET Capacity = @Capacity, StartLatitude = @StartLatitude, 
-                        StartLongitude = @StartLongitude, StartAddress = @StartAddress
-                    WHERE VehicleID = @VehicleID";
-                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-                cmd.Parameters.AddWithValue("@Capacity", capacity);
-                cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
-                cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
-                cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        /// <summary>
-        /// Updates a vehicle's availability for tomorrow
-        /// </summary>
-        public async Task<bool> UpdateVehicleAvailabilityAsync(int vehicleId, bool isAvailable)
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "UPDATE Vehicles SET IsAvailableTomorrow = @IsAvailable WHERE VehicleID = @VehicleID";
-                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-                cmd.Parameters.AddWithValue("@IsAvailable", isAvailable ? 1 : 0);
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        /// <summary>
-        /// Gets all vehicles in the database, not just those available for tomorrow
-        /// </summary>
-        public async Task<List<Vehicle>> GetAllVehiclesAsync()
-        {
-            var vehicles = new List<Vehicle>();
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
-                           v.StartAddress, v.IsAvailableTomorrow, v.DepartureTime, u.Name
-                    FROM Vehicles v
-                    LEFT JOIN Users u ON v.UserID = u.UserID";
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        vehicles.Add(new Vehicle
-                        {
-                            Id = reader.GetInt32(0),
-                            UserId = reader.GetInt32(1),
-                            Capacity = reader.GetInt32(2),
-                            StartLatitude = reader.GetDouble(3),
-                            StartLongitude = reader.GetDouble(4),
-                            StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
-                            IsAvailableTomorrow = reader.GetInt32(6) == 1,
-                            DepartureTime = reader.IsDBNull(7) ? null : reader.GetString(7),
-                            DriverName = reader.IsDBNull(8) ? null : reader.GetString(8),
-                            AssignedPassengers = new List<Passenger>()
-                        });
-                    }
-                }
-            }
-
-            return vehicles;
-        }
-
-        /// <summary>
-        /// Gets all vehicles that are available for tomorrow
-        /// </summary>
-        public async Task<List<Vehicle>> GetAvailableVehiclesAsync()
-        {
-            var vehicles = new List<Vehicle>();
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
-                           v.StartAddress, v.DepartureTime, u.Name
-                    FROM Vehicles v
-                    JOIN Users u ON v.UserID = u.UserID
-                    WHERE v.IsAvailableTomorrow = 1";
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        vehicles.Add(new Vehicle
-                        {
-                            Id = reader.GetInt32(0),
-                            UserId = reader.GetInt32(1),
-                            Capacity = reader.GetInt32(2),
-                            StartLatitude = reader.GetDouble(3),
-                            StartLongitude = reader.GetDouble(4),
-                            StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
-                            DepartureTime = reader.IsDBNull(6) ? null : reader.GetString(6),
-                            DriverName = reader.GetString(7),
-                            AssignedPassengers = new List<Passenger>(),
-                            IsAvailableTomorrow = true
-                        });
-                    }
-                }
-            }
-
-            return vehicles;
-        }
-
-        /// <summary>
-        /// Gets a vehicle by user ID
-        /// </summary>
-        public async Task<Vehicle> GetVehicleByUserIdAsync(int userId)
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT VehicleID, Capacity, StartLatitude, StartLongitude, StartAddress, 
-                           IsAvailableTomorrow, DepartureTime
-                    FROM Vehicles
-                    WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        return new Vehicle
-                        {
-                            Id = reader.GetInt32(0),
-                            UserId = userId,
-                            Capacity = reader.GetInt32(1),
-                            StartLatitude = reader.GetDouble(2),
-                            StartLongitude = reader.GetDouble(3),
-                            StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
-                            IsAvailableTomorrow = reader.GetInt32(5) == 1,
-                            DepartureTime = reader.IsDBNull(6) ? null : reader.GetString(6),
-                            AssignedPassengers = new List<Passenger>()
-                        };
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Gets a vehicle by its ID
-        /// </summary>
-        public async Task<Vehicle> GetVehicleByIdAsync(int vehicleId)
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
-                           v.StartAddress, v.IsAvailableTomorrow, v.DepartureTime, u.Name
-                    FROM Vehicles v
-                    LEFT JOIN Users u ON v.UserID = u.UserID
-                    WHERE v.VehicleID = @VehicleID";
-                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        return new Vehicle
-                        {
-                            Id = reader.GetInt32(0),
-                            UserId = reader.GetInt32(1),
-                            Capacity = reader.GetInt32(2),
-                            StartLatitude = reader.GetDouble(3),
-                            StartLongitude = reader.GetDouble(4),
-                            StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
-                            IsAvailableTomorrow = reader.GetInt32(6) == 1,
-                            DepartureTime = reader.IsDBNull(7) ? null : reader.GetString(7),
-                            DriverName = reader.IsDBNull(8) ? null : reader.GetString(8),
-                            AssignedPassengers = new List<Passenger>()
-                        };
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Creates a new vehicle for a user or updates an existing one
-        /// </summary>
-        public async Task<int> SaveDriverVehicleAsync(int userId, int capacity, double startLatitude, double startLongitude, string startAddress = "")
-        {
-            // First check if the driver already has a vehicle
-            var existingVehicle = await GetVehicleByUserIdAsync(userId);
-
-            if (existingVehicle != null)
-            {
-                // Update existing vehicle
-                using (var cmd = new SQLiteCommand(connection))
-                {
-                    cmd.CommandText = @"
-                UPDATE Vehicles
-                SET Capacity = @Capacity, StartLatitude = @StartLatitude, 
-                    StartLongitude = @StartLongitude, StartAddress = @StartAddress
-                WHERE UserID = @UserID";
-                    cmd.Parameters.AddWithValue("@UserID", userId);
-                    cmd.Parameters.AddWithValue("@Capacity", capacity);
-                    cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
-                    cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
-                    cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
-
-                    await cmd.ExecuteNonQueryAsync();
-                    return existingVehicle.Id;
-                }
-            }
-            else
-            {
-                // Create a new vehicle
-                using (var cmd = new SQLiteCommand(connection))
-                {
-                    cmd.CommandText = @"
-                INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, StartAddress, IsAvailableTomorrow)
-                VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, @StartAddress, 1);
-                SELECT last_insert_rowid();";
-                    cmd.Parameters.AddWithValue("@UserID", userId);
-                    cmd.Parameters.AddWithValue("@Capacity", capacity);
-                    cmd.Parameters.AddWithValue("@StartLatitude", startLatitude);
-                    cmd.Parameters.AddWithValue("@StartLongitude", startLongitude);
-                    cmd.Parameters.AddWithValue("@StartAddress", startAddress ?? "");
-
-                    object result = await cmd.ExecuteScalarAsync();
-                    if (result != null && int.TryParse(result.ToString(), out int vehicleId))
-                    {
-                        return vehicleId;
-                    }
-                }
-            }
-
-            return -1;
-        }
-
-        /// <summary>
-        /// Updates vehicle capacity
-        /// </summary>
-        public async Task<bool> UpdateVehicleCapacityAsync(int userId, int capacity)
-        {
-            var vehicle = await GetVehicleByUserIdAsync(userId);
-
-            if (vehicle == null)
-            {
-                // If the vehicle doesn't exist yet, create it with default location
-                await SaveDriverVehicleAsync(userId, capacity, 0, 0, "");
-                return true;
-            }
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    UPDATE Vehicles
-                    SET Capacity = @Capacity
-                    WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Capacity", capacity);
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        /// <summary>
-        /// Updates vehicle location
-        /// </summary>
-        public async Task<bool> UpdateVehicleLocationAsync(int userId, double latitude, double longitude, string address = "")
-        {
-            var vehicle = await GetVehicleByUserIdAsync(userId);
-
-            if (vehicle == null)
-            {
-                // If the vehicle doesn't exist yet, create it with default capacity
-                await SaveDriverVehicleAsync(userId, 4, latitude, longitude, address);
-                return true;
-            }
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    UPDATE Vehicles
-                    SET StartLatitude = @Latitude, StartLongitude = @Longitude, StartAddress = @Address
-                    WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Latitude", latitude);
-                cmd.Parameters.AddWithValue("@Longitude", longitude);
-                cmd.Parameters.AddWithValue("@Address", address ?? "");
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        /// <summary>
-        /// Deletes a vehicle from the database
-        /// </summary>
-        public async Task<bool> DeleteVehicleAsync(int vehicleId)
-        {
-            using (var transaction = connection.BeginTransaction())
-            {
-                try
-                {
-                    // Delete any route assignments for this vehicle
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = @"
-                            DELETE FROM PassengerAssignments
-                            WHERE RouteDetailID IN (
-                                SELECT RouteDetailID FROM RouteDetails
-                                WHERE VehicleID = @VehicleID
-                            )";
-                        cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-                        await cmd.ExecuteNonQueryAsync();
-                    }
-
-                    // Delete route details
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = "DELETE FROM RouteDetails WHERE VehicleID = @VehicleID";
-                        cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-                        await cmd.ExecuteNonQueryAsync();
-                    }
-
-                    // Delete the vehicle
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = "DELETE FROM Vehicles WHERE VehicleID = @VehicleID";
-                        cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-                        int result = await cmd.ExecuteNonQueryAsync();
-
-                        if (result == 0)
-                        {
-                            transaction.Rollback();
-                            return false;
-                        }
-                    }
-
-                    transaction.Commit();
-                    return true;
-                }
-                catch (Exception)
-                {
-                    transaction.Rollback();
-                    throw;
-                }
-            }
-        }
-        #endregion
-
-        #region Passenger Methods
-
-        /// <summary>
-        /// Adds a new passenger to the database
-        /// </summary>
-        public async Task<int> AddPassengerAsync(int userId, string name, double latitude, double longitude, string address = "")
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    INSERT INTO Passengers (UserID, Name, Latitude, Longitude, Address)
-                    VALUES (@UserID, @Name, @Latitude, @Longitude, @Address);
-                    SELECT last_insert_rowid();";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-                cmd.Parameters.AddWithValue("@Name", name);
-                cmd.Parameters.AddWithValue("@Latitude", latitude);
-                cmd.Parameters.AddWithValue("@Longitude", longitude);
-                cmd.Parameters.AddWithValue("@Address", address ?? "");
-
-                object result = await cmd.ExecuteScalarAsync();
-                if (result != null && int.TryParse(result.ToString(), out int passengerId))
-                {
-                    return passengerId;
-                }
-            }
-
-            return -1;
-        }
-
-        /// <summary>
-        /// Updates a passenger's information
-        /// </summary>
-        public async Task<bool> UpdatePassengerAsync(int passengerId, string name, double latitude, double longitude, string address = "")
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    UPDATE Passengers
-                    SET Name = @Name, Latitude = @Latitude, Longitude = @Longitude, Address = @Address
-                    WHERE PassengerID = @PassengerID";
-                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
-                cmd.Parameters.AddWithValue("@Name", name);
-                cmd.Parameters.AddWithValue("@Latitude", latitude);
-                cmd.Parameters.AddWithValue("@Longitude", longitude);
-                cmd.Parameters.AddWithValue("@Address", address ?? "");
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        /// <summary>
-        /// Updates a passenger's availability for tomorrow
-        /// </summary>
-        public async Task<bool> UpdatePassengerAvailabilityAsync(int passengerId, bool isAvailable)
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "UPDATE Passengers SET IsAvailableTomorrow = @IsAvailable WHERE PassengerID = @PassengerID";
-                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
-                cmd.Parameters.AddWithValue("@IsAvailable", isAvailable ? 1 : 0);
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        /// <summary>
-        /// Gets all passengers that are available for tomorrow
-        /// </summary>
-        public async Task<List<Passenger>> GetAvailablePassengersAsync()
-        {
-            var passengers = new List<Passenger>();
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT PassengerID, Name, Latitude, Longitude, Address, EstimatedPickupTime
-                    FROM Passengers
-                    WHERE IsAvailableTomorrow = 1";
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        passengers.Add(new Passenger
-                        {
-                            Id = reader.GetInt32(0),
-                            Name = reader.GetString(1),
-                            Latitude = reader.GetDouble(2),
-                            Longitude = reader.GetDouble(3),
-                            Address = reader.IsDBNull(4) ? null : reader.GetString(4),
-                            EstimatedPickupTime = reader.IsDBNull(5) ? null : reader.GetString(5),
-                            IsAvailableTomorrow = true
-                        });
-                    }
-                }
-            }
-
-            return passengers;
-        }
-
-        /// <summary>
-        /// Gets all passengers in the database, not just those available for tomorrow
-        /// </summary>
-        public async Task<List<Passenger>> GetAllPassengersAsync()
-        {
-            var passengers = new List<Passenger>();
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT PassengerID, UserID, Name, Latitude, Longitude, Address, 
-                           IsAvailableTomorrow, EstimatedPickupTime
-                    FROM Passengers";
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        passengers.Add(new Passenger
-                        {
-                            Id = reader.GetInt32(0),
-                            UserId = reader.GetInt32(1),
-                            Name = reader.GetString(2),
-                            Latitude = reader.GetDouble(3),
-                            Longitude = reader.GetDouble(4),
-                            Address = reader.IsDBNull(5) ? null : reader.GetString(5),
-                            IsAvailableTomorrow = reader.GetInt32(6) == 1,
-                            EstimatedPickupTime = reader.IsDBNull(7) ? null : reader.GetString(7)
-                        });
-                    }
-                }
-            }
-
-            return passengers;
-        }
-
-        /// <summary>
-        /// Gets a passenger by user ID
-        /// </summary>
-        public async Task<Passenger> GetPassengerByUserIdAsync(int userId)
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT PassengerID, Name, Latitude, Longitude, Address, IsAvailableTomorrow, EstimatedPickupTime
-                    FROM Passengers
-                    WHERE UserID = @UserID";
-                cmd.Parameters.AddWithValue("@UserID", userId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        return new Passenger
-                        {
-                            Id = reader.GetInt32(0),
-                            UserId = userId,
-                            Name = reader.GetString(1),
-                            Latitude = reader.GetDouble(2),
-                            Longitude = reader.GetDouble(3),
-                            Address = reader.IsDBNull(4) ? null : reader.GetString(4),
-                            IsAvailableTomorrow = reader.GetInt32(5) == 1,
-                            EstimatedPickupTime = reader.IsDBNull(6) ? null : reader.GetString(6)
-                        };
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Gets a passenger by its ID
-        /// </summary>
-        public async Task<Passenger> GetPassengerByIdAsync(int passengerId)
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT PassengerID, UserID, Name, Latitude, Longitude, Address, 
-                           IsAvailableTomorrow, EstimatedPickupTime
-                    FROM Passengers
-                    WHERE PassengerID = @PassengerID";
-                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        return new Passenger
-                        {
-                            Id = reader.GetInt32(0),
-                            UserId = reader.GetInt32(1),
-                            Name = reader.GetString(2),
-                            Latitude = reader.GetDouble(3),
-                            Longitude = reader.GetDouble(4),
-                            Address = reader.IsDBNull(5) ? null : reader.GetString(5),
-                            IsAvailableTomorrow = reader.GetInt32(6) == 1,
-                            EstimatedPickupTime = reader.IsDBNull(7) ? null : reader.GetString(7)
-                        };
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Deletes a passenger from the database
-        /// </summary>
-        public async Task<bool> DeletePassengerAsync(int passengerId)
-        {
-            using (var transaction = connection.BeginTransaction())
-            {
-                try
-                {
-                    // Delete any route assignments for this passenger
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = "DELETE FROM PassengerAssignments WHERE PassengerID = @PassengerID";
-                        cmd.Parameters.AddWithValue("@PassengerID", passengerId);
-                        await cmd.ExecuteNonQueryAsync();
-                    }
-
-                    // Delete the passenger
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = "DELETE FROM Passengers WHERE PassengerID = @PassengerID";
-                        cmd.Parameters.AddWithValue("@PassengerID", passengerId);
-                        int result = await cmd.ExecuteNonQueryAsync();
-
-                        if (result == 0)
-                        {
-                            transaction.Rollback();
-                            return false;
-                        }
-                    }
-
-                    transaction.Commit();
-                    return true;
-                }
-                catch (Exception)
-                {
-                    transaction.Rollback();
-                    throw;
-                }
-            }
-        }
-        #endregion
-
-        #region Destination Methods
-
-        /// <summary>
-        /// Gets the destination information
-        /// </summary>
-        public async Task<(int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime)> GetDestinationAsync()
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT DestinationID, Name, Latitude, Longitude, Address, TargetArrivalTime
-                    FROM Destination
-                    ORDER BY DestinationID LIMIT 1";
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        return (
-                            reader.GetInt32(0),
-                            reader.GetString(1),
-                            reader.GetDouble(2),
-                            reader.GetDouble(3),
-                            reader.IsDBNull(4) ? null : reader.GetString(4),
-                            reader.GetString(5)
-                        );
-                    }
-                }
-            }
-
-            // Return default values if no destination is found
-            return (0, "Default", 32.0741, 34.7922, null, "08:00:00");
-        }
-
-        /// <summary>
-        /// Updates the destination information
-        /// </summary>
-        public async Task<bool> UpdateDestinationAsync(string name, double latitude, double longitude, string targetTime, string address = "")
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    UPDATE Destination
-                    SET Name = @Name, Latitude = @Latitude, Longitude = @Longitude, 
-                        Address = @Address, TargetArrivalTime = @TargetArrivalTime
-                    WHERE DestinationID = (SELECT DestinationID FROM Destination ORDER BY DestinationID LIMIT 1)";
-                cmd.Parameters.AddWithValue("@Name", name);
-                cmd.Parameters.AddWithValue("@Latitude", latitude);
-                cmd.Parameters.AddWithValue("@Longitude", longitude);
-                cmd.Parameters.AddWithValue("@Address", address ?? "");
-                cmd.Parameters.AddWithValue("@TargetArrivalTime", targetTime);
-
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
-        }
-
-        #endregion
-        #region Route Methods
-
-        /// <summary>
-        /// Saves a solution to the database
-        /// </summary>
-        public async Task<int> SaveSolutionAsync(Solution solution, string date)
-        {
-            // Begin transaction to ensure all related data is saved correctly
-            using (var transaction = connection.BeginTransaction())
-            {
-                try
-                {
-                    int routeId;
-
-                    // Insert route record
-                    using (var cmd = new SQLiteCommand(connection))
-                    {
-                        cmd.CommandText = @"
-                            INSERT INTO Routes (SolutionDate)
-                            VALUES (@SolutionDate);
-                            SELECT last_insert_rowid();";
-                        cmd.Parameters.AddWithValue("@SolutionDate", date);
-                        cmd.Transaction = transaction;
-
-                        object result = await cmd.ExecuteScalarAsync();
-                        if (result == null || !int.TryParse(result.ToString(), out routeId))
-                        {
-                            transaction.Rollback();
-                            return -1;
-                        }
-                    }
-
-                    // Save each vehicle's route
-                    foreach (var vehicle in solution.Vehicles)
-                    {
-                        if (vehicle.AssignedPassengers.Count == 0)
-                            continue;
-
-                        int routeDetailId;
-
-                        // Insert route detail including departure time
-                        using (var cmd = new SQLiteCommand(connection))
-                        {
-                            cmd.CommandText = @"
-                                INSERT INTO RouteDetails (RouteID, VehicleID, TotalDistance, TotalTime, DepartureTime)
-                                VALUES (@RouteID, @VehicleID, @TotalDistance, @TotalTime, @DepartureTime);
-                                SELECT last_insert_rowid();";
-                            cmd.Parameters.AddWithValue("@RouteID", routeId);
-                            cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
-                            cmd.Parameters.AddWithValue("@TotalDistance", vehicle.TotalDistance);
-                            cmd.Parameters.AddWithValue("@TotalTime", vehicle.TotalTime);
-                            cmd.Parameters.AddWithValue("@DepartureTime", vehicle.DepartureTime ?? (object)DBNull.Value);
-                            cmd.Transaction = transaction;
-
-                            object result = await cmd.ExecuteScalarAsync();
-                            if (result == null || !int.TryParse(result.ToString(), out routeDetailId))
-                            {
-                                transaction.Rollback();
-                                return -1;
-                            }
-                        }
-
-                        // Also update vehicle with departure time
-                        using (var cmd = new SQLiteCommand(connection))
-                        {
-                            cmd.CommandText = @"
-                                UPDATE Vehicles 
-                                SET DepartureTime = @DepartureTime
-                                WHERE VehicleID = @VehicleID";
-                            cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
-                            cmd.Parameters.AddWithValue("@DepartureTime", vehicle.DepartureTime ?? (object)DBNull.Value);
-                            cmd.Transaction = transaction;
-                            await cmd.ExecuteNonQueryAsync();
-                        }
-
-                        // Save passenger assignments with estimated pickup times
-                        for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
-                        {
-                            var passenger = vehicle.AssignedPassengers[i];
-
-                            using (var cmd = new SQLiteCommand(connection))
-                            {
-                                cmd.CommandText = @"
-                                    INSERT INTO PassengerAssignments (RouteDetailID, PassengerID, StopOrder, EstimatedPickupTime)
-                                    VALUES (@RouteDetailID, @PassengerID, @StopOrder, @EstimatedPickupTime)";
-                                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
-                                cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
-                                cmd.Parameters.AddWithValue("@StopOrder", i + 1);
-                                cmd.Parameters.AddWithValue("@EstimatedPickupTime",
-                                    !string.IsNullOrEmpty(passenger.EstimatedPickupTime) ?
-                                    passenger.EstimatedPickupTime : (object)DBNull.Value);
-                                cmd.Transaction = transaction;
-
-                                await cmd.ExecuteNonQueryAsync();
-                            }
-
-                            // Also update passenger with estimated pickup time
-                            using (var cmd = new SQLiteCommand(connection))
-                            {
-                                cmd.CommandText = @"
-                                    UPDATE Passengers 
-                                    SET EstimatedPickupTime = @EstimatedPickupTime
-                                    WHERE PassengerID = @PassengerID";
-                                cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
-                                cmd.Parameters.AddWithValue("@EstimatedPickupTime",
-                                    !string.IsNullOrEmpty(passenger.EstimatedPickupTime) ?
-                                    passenger.EstimatedPickupTime : (object)DBNull.Value);
-                                cmd.Transaction = transaction;
-                                await cmd.ExecuteNonQueryAsync();
-                            }
-                        }
-                    }
-
-                    // Commit the transaction
-                    transaction.Commit();
-                    return routeId;
-                }
-                catch (Exception)
-                {
-                    transaction.Rollback();
-                    throw;
-                }
-            }
-        }
-
-        /// <summary>
-        /// Gets driver's route and assigned passengers for a specific date
-        /// </summary>
-        /// <summary>
-        /// Gets driver's route and assigned passengers for a specific date
-        /// </summary>
-        public async Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)> GetDriverRouteAsync(int userId, string date)
-        {
-            // Get driver's vehicle first
-            var vehicle = await GetVehicleByUserIdAsync(userId);
-            if (vehicle == null)
-            {
-                return (null, null, null);
-            }
-
-            // Get route for this date
-            int routeId;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
-                cmd.Parameters.AddWithValue("@SolutionDate", date);
-
-                object result = await cmd.ExecuteScalarAsync();
-                if (result == null || !int.TryParse(result.ToString(), out routeId))
-                {
-                    return (vehicle, new List<Passenger>(), null);
-                }
-            }
-
-            // Get route details for this vehicle
-            int routeDetailId = 0;
-            string departureTime = null;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-            SELECT RouteDetailID, TotalDistance, TotalTime, DepartureTime
-            FROM RouteDetails 
-            WHERE RouteID = @RouteID AND VehicleID = @VehicleID";
-                cmd.Parameters.AddWithValue("@RouteID", routeId);
-                cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        routeDetailId = reader.GetInt32(0);
-                        vehicle.TotalDistance = reader.GetDouble(1);
-                        vehicle.TotalTime = reader.GetDouble(2);
-                        departureTime = reader.IsDBNull(3) ? null : reader.GetString(3);
-                        vehicle.DepartureTime = departureTime;
+                        transaction.Commit();
+                        return true;
                     }
                     else
                     {
-                        return (vehicle, new List<Passenger>(), null);
-                    }
-                }
-            }
-
-            // Get assigned passengers and pickup times
-            var passengers = new List<Passenger>();
-            DateTime? firstPickupTime = null;
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-            SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
-                   p.Name, p.Latitude, p.Longitude, p.Address
-            FROM PassengerAssignments pa
-            JOIN Passengers p ON pa.PassengerID = p.PassengerID
-            WHERE pa.RouteDetailID = @RouteDetailID
-            ORDER BY pa.StopOrder";
-                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        string pickupTime = reader.IsDBNull(2) ? null : reader.GetString(2);
-
-                        var passenger = new Passenger
-                        {
-                            Id = reader.GetInt32(0),
-                            Name = reader.GetString(3),
-                            Latitude = reader.GetDouble(4),
-                            Longitude = reader.GetDouble(5),
-                            Address = reader.IsDBNull(6) ? null : reader.GetString(6),
-                            EstimatedPickupTime = pickupTime
-                        };
-
-                        passengers.Add(passenger);
-
-                        if (passengers.Count == 1 && !string.IsNullOrEmpty(pickupTime))
-                        {
-                            try
-                            {
-                                firstPickupTime = DateTime.Parse(pickupTime);
-                            }
-                            catch
-                            {
-                                // If parsing fails, leave as null
-                            }
-                        }
-                    }
-                }
-            }
-
-            // If no first pickup time was found and we have a departure time, estimate a pickup time
-            if (firstPickupTime == null && !string.IsNullOrEmpty(departureTime) && passengers.Count > 0)
-            {
-                try
-                {
-                    DateTime departure = DateTime.Parse(departureTime);
-                    firstPickupTime = departure.AddMinutes(15); // Estimate 15 min to first passenger
-
-                    // Update the first passenger's estimated pickup time if it's not already set
-                    if (string.IsNullOrEmpty(passengers[0].EstimatedPickupTime))
-                    {
-                        passengers[0].EstimatedPickupTime = firstPickupTime.Value.ToString("HH:mm");
+                        transaction.Rollback();
+                        return false;
                     }
                 }
                 catch
                 {
-                    // If parsing fails, leave as null
+                    transaction.Rollback();
+                    throw;
                 }
             }
+        }
 
-            // Check if we need to get departure time from the Vehicles table as a fallback
-            if (string.IsNullOrEmpty(vehicle.DepartureTime))
+        private async Task DeleteVehicleForUserAsync(int userId, SQLiteTransaction transaction)
+        {
+            var parameters = new Dictionary<string, object> { { "@UserID", userId } };
+            string query = "DELETE FROM Vehicles WHERE UserID = @UserID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
             {
-                using (var cmd = new SQLiteCommand(connection))
-                {
-                    cmd.CommandText = "SELECT DepartureTime FROM Vehicles WHERE VehicleID = @VehicleID";
-                    cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
 
-                    var result = await cmd.ExecuteScalarAsync();
-                    if (result != null && !Convert.IsDBNull(result))
+        private async Task DeletePassengerForUserAsync(int userId, SQLiteTransaction transaction)
+        {
+            var parameters = new Dictionary<string, object> { { "@UserID", userId } };
+            string query = "DELETE FROM Passengers WHERE UserID = @UserID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        private async Task<bool> DeleteUserRecordAsync(int userId, SQLiteTransaction transaction)
+        {
+            var parameters = new Dictionary<string, object> { { "@UserID", userId } };
+            string query = "DELETE FROM Users WHERE UserID = @UserID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@UserID", userId);
+                int rowsAffected = await cmd.ExecuteNonQueryAsync();
+                return rowsAffected > 0;
+            }
+        }
+
+        public async Task<List<(int Id, string Username, string Name)>> GetUsersByTypeAsync(string userType)
+        {
+            var parameters = new Dictionary<string, object> { { "@UserType", userType } };
+
+            string query = @"
+                SELECT UserID, Username, Name
+                FROM Users
+                WHERE UserType = @UserType
+                ORDER BY Username";
+
+            return await _dbManager.ExecuteReaderAsync<(int, string, string)>(
+                query,
+                async reader => (
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetString(2)
+                ),
+                parameters
+            );
+        }
+    }
+
+    /// <summary>
+    /// Service for vehicle-related database operations
+    /// </summary>
+    public class VehicleService
+    {
+        private readonly DatabaseManager _dbManager;
+        private readonly SQLiteConnection _connection;
+
+        public VehicleService(DatabaseManager dbManager)
+        {
+            _dbManager = dbManager ?? throw new ArgumentNullException(nameof(dbManager));
+            _connection = dbManager.GetConnection();
+        }
+
+        public async Task<int> AddVehicleAsync(int userId, int capacity,
+            double startLatitude, double startLongitude, string startAddress = "")
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@UserID", userId },
+                { "@Capacity", capacity },
+                { "@StartLatitude", startLatitude },
+                { "@StartLongitude", startLongitude },
+                { "@StartAddress", startAddress ?? "" }
+            };
+
+            string query = @"
+                INSERT INTO Vehicles (UserID, Capacity, StartLatitude, StartLongitude, StartAddress)
+                VALUES (@UserID, @Capacity, @StartLatitude, @StartLongitude, @StartAddress);
+                SELECT last_insert_rowid();";
+
+            var vehicleId = await _dbManager.ExecuteScalarAsync<int>(query, parameters);
+            return vehicleId > 0 ? vehicleId : -1;
+        }
+
+        public async Task<bool> UpdateVehicleAsync(int vehicleId, int capacity,
+            double startLatitude, double startLongitude, string startAddress = "")
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@VehicleID", vehicleId },
+                { "@Capacity", capacity },
+                { "@StartLatitude", startLatitude },
+                { "@StartLongitude", startLongitude },
+                { "@StartAddress", startAddress ?? "" }
+            };
+
+            string query = @"
+                UPDATE Vehicles
+                SET Capacity = @Capacity, StartLatitude = @StartLatitude, 
+                    StartLongitude = @StartLongitude, StartAddress = @StartAddress
+                WHERE VehicleID = @VehicleID";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
+        }
+
+        public async Task<bool> UpdateVehicleAvailabilityAsync(int vehicleId, bool isAvailable)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@VehicleID", vehicleId },
+                { "@IsAvailable", isAvailable ? 1 : 0 }
+            };
+
+            string query = "UPDATE Vehicles SET IsAvailableTomorrow = @IsAvailable WHERE VehicleID = @VehicleID";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
+        }
+
+        public async Task<List<Vehicle>> GetAllVehiclesAsync()
+        {
+            string query = @"
+                SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
+                       v.StartAddress, v.IsAvailableTomorrow, v.DepartureTime, u.Name
+                FROM Vehicles v
+                LEFT JOIN Users u ON v.UserID = u.UserID";
+
+            return await _dbManager.ExecuteReaderAsync<Vehicle>(
+                query,
+                async reader => new Vehicle
+                {
+                    Id = reader.GetInt32(0),
+                    UserId = reader.GetInt32(1),
+                    Capacity = reader.GetInt32(2),
+                    StartLatitude = reader.GetDouble(3),
+                    StartLongitude = reader.GetDouble(4),
+                    StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    IsAvailableTomorrow = reader.GetInt32(6) == 1,
+                    DepartureTime = reader.IsDBNull(7) ? null : reader.GetString(7),
+                    DriverName = reader.IsDBNull(8) ? null : reader.GetString(8),
+                    AssignedPassengers = new List<Passenger>()
+                },
+                null
+            );
+        }
+
+        public async Task<List<Vehicle>> GetAvailableVehiclesAsync()
+        {
+            string query = @"
+                SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
+                       v.StartAddress, v.DepartureTime, u.Name
+                FROM Vehicles v
+                JOIN Users u ON v.UserID = u.UserID
+                WHERE v.IsAvailableTomorrow = 1";
+
+            return await _dbManager.ExecuteReaderAsync<Vehicle>(
+                query,
+                async reader => new Vehicle
+                {
+                    Id = reader.GetInt32(0),
+                    UserId = reader.GetInt32(1),
+                    Capacity = reader.GetInt32(2),
+                    StartLatitude = reader.GetDouble(3),
+                    StartLongitude = reader.GetDouble(4),
+                    StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    DepartureTime = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    DriverName = reader.GetString(7),
+                    AssignedPassengers = new List<Passenger>(),
+                    IsAvailableTomorrow = true
+                },
+                null
+            );
+        }
+
+        public async Task<Vehicle> GetVehicleByUserIdAsync(int userId)
+        {
+            var parameters = new Dictionary<string, object> { { "@UserID", userId } };
+
+            string query = @"
+                SELECT VehicleID, Capacity, StartLatitude, StartLongitude, StartAddress, 
+                       IsAvailableTomorrow, DepartureTime
+                FROM Vehicles
+                WHERE UserID = @UserID";
+
+            return await _dbManager.ExecuteReaderSingleAsync<Vehicle>(
+                query,
+                async reader => new Vehicle
+                {
+                    Id = reader.GetInt32(0),
+                    UserId = userId,
+                    Capacity = reader.GetInt32(1),
+                    StartLatitude = reader.GetDouble(2),
+                    StartLongitude = reader.GetDouble(3),
+                    StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    IsAvailableTomorrow = reader.GetInt32(5) == 1,
+                    DepartureTime = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    AssignedPassengers = new List<Passenger>()
+                },
+                parameters
+            );
+        }
+
+        public async Task<Vehicle> GetVehicleByIdAsync(int vehicleId)
+        {
+            var parameters = new Dictionary<string, object> { { "@VehicleID", vehicleId } };
+
+            string query = @"
+                SELECT v.VehicleID, v.UserID, v.Capacity, v.StartLatitude, v.StartLongitude, 
+                       v.StartAddress, v.IsAvailableTomorrow, v.DepartureTime, u.Name
+                FROM Vehicles v
+                LEFT JOIN Users u ON v.UserID = u.UserID
+                WHERE v.VehicleID = @VehicleID";
+
+            return await _dbManager.ExecuteReaderSingleAsync<Vehicle>(
+                query,
+                async reader => new Vehicle
+                {
+                    Id = reader.GetInt32(0),
+                    UserId = reader.GetInt32(1),
+                    Capacity = reader.GetInt32(2),
+                    StartLatitude = reader.GetDouble(3),
+                    StartLongitude = reader.GetDouble(4),
+                    StartAddress = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    IsAvailableTomorrow = reader.GetInt32(6) == 1,
+                    DepartureTime = reader.IsDBNull(7) ? null : reader.GetString(7),
+                    DriverName = reader.IsDBNull(8) ? null : reader.GetString(8),
+                    AssignedPassengers = new List<Passenger>()
+                },
+                parameters
+            );
+        }
+
+        public async Task<int> SaveDriverVehicleAsync(int userId, int capacity,
+            double startLatitude, double startLongitude, string startAddress = "")
+        {
+            var existingVehicle = await GetVehicleByUserIdAsync(userId);
+
+            if (existingVehicle != null)
+            {
+                await UpdateVehicleAsync(existingVehicle.Id, capacity, startLatitude,
+                    startLongitude, startAddress);
+                return existingVehicle.Id;
+            }
+            else
+            {
+                return await AddVehicleAsync(userId, capacity, startLatitude, startLongitude, startAddress);
+            }
+        }
+
+        public async Task<bool> DeleteVehicleAsync(int vehicleId)
+        {
+            using (var transaction = _connection.BeginTransaction())
+            {
+                try
+                {
+                    await DeletePassengerAssignmentsForVehicleAsync(vehicleId, transaction);
+                    await DeleteRouteDetailsForVehicleAsync(vehicleId, transaction);
+                    bool deleted = await DeleteVehicleRecordAsync(vehicleId, transaction);
+
+                    if (deleted)
                     {
-                        vehicle.DepartureTime = result.ToString();
+                        transaction.Commit();
+                        return true;
+                    }
+                    else
+                    {
+                        transaction.Rollback();
+                        return false;
                     }
                 }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+        }
+
+        private async Task DeletePassengerAssignmentsForVehicleAsync(int vehicleId, SQLiteTransaction transaction)
+        {
+            string query = @"
+                DELETE FROM PassengerAssignments
+                WHERE RouteDetailID IN (
+                    SELECT RouteDetailID FROM RouteDetails
+                    WHERE VehicleID = @VehicleID
+                )";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        private async Task DeleteRouteDetailsForVehicleAsync(int vehicleId, SQLiteTransaction transaction)
+        {
+            string query = "DELETE FROM RouteDetails WHERE VehicleID = @VehicleID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        private async Task<bool> DeleteVehicleRecordAsync(int vehicleId, SQLiteTransaction transaction)
+        {
+            string query = "DELETE FROM Vehicles WHERE VehicleID = @VehicleID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                int result = await cmd.ExecuteNonQueryAsync();
+                return result > 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Service for passenger-related database operations
+    /// </summary>
+    public class PassengerService
+    {
+        private readonly DatabaseManager _dbManager;
+        private readonly SQLiteConnection _connection;
+
+        public PassengerService(DatabaseManager dbManager)
+        {
+            _dbManager = dbManager ?? throw new ArgumentNullException(nameof(dbManager));
+            _connection = dbManager.GetConnection();
+        }
+
+        public async Task<int> AddPassengerAsync(int userId, string name,
+            double latitude, double longitude, string address = "")
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@UserID", userId },
+                { "@Name", name },
+                { "@Latitude", latitude },
+                { "@Longitude", longitude },
+                { "@Address", address ?? "" }
+            };
+
+            string query = @"
+                INSERT INTO Passengers (UserID, Name, Latitude, Longitude, Address)
+                VALUES (@UserID, @Name, @Latitude, @Longitude, @Address);
+                SELECT last_insert_rowid();";
+
+            var passengerId = await _dbManager.ExecuteScalarAsync<int>(query, parameters);
+            return passengerId > 0 ? passengerId : -1;
+        }
+
+        public async Task<bool> UpdatePassengerAsync(int passengerId, string name,
+            double latitude, double longitude, string address = "")
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@PassengerID", passengerId },
+                { "@Name", name },
+                { "@Latitude", latitude },
+                { "@Longitude", longitude },
+                { "@Address", address ?? "" }
+            };
+
+            string query = @"
+                UPDATE Passengers
+                SET Name = @Name, Latitude = @Latitude, Longitude = @Longitude, Address = @Address
+                WHERE PassengerID = @PassengerID";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
+        }
+
+        public async Task<bool> UpdatePassengerAvailabilityAsync(int passengerId, bool isAvailable)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@PassengerID", passengerId },
+                { "@IsAvailable", isAvailable ? 1 : 0 }
+            };
+
+            string query = "UPDATE Passengers SET IsAvailableTomorrow = @IsAvailable WHERE PassengerID = @PassengerID";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
+        }
+
+        public async Task<List<Passenger>> GetAvailablePassengersAsync()
+        {
+            string query = @"
+                SELECT PassengerID, Name, Latitude, Longitude, Address, EstimatedPickupTime
+                FROM Passengers
+                WHERE IsAvailableTomorrow = 1";
+
+            return await _dbManager.ExecuteReaderAsync<Passenger>(
+                query,
+                async reader => new Passenger
+                {
+                    Id = reader.GetInt32(0),
+                    Name = reader.GetString(1),
+                    Latitude = reader.GetDouble(2),
+                    Longitude = reader.GetDouble(3),
+                    Address = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    EstimatedPickupTime = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    IsAvailableTomorrow = true
+                },
+                null
+            );
+        }
+
+        public async Task<List<Passenger>> GetAllPassengersAsync()
+        {
+            string query = @"
+                SELECT PassengerID, UserID, Name, Latitude, Longitude, Address, 
+                       IsAvailableTomorrow, EstimatedPickupTime
+                FROM Passengers";
+
+            return await _dbManager.ExecuteReaderAsync<Passenger>(
+                query,
+                async reader => new Passenger
+                {
+                    Id = reader.GetInt32(0),
+                    UserId = reader.GetInt32(1),
+                    Name = reader.GetString(2),
+                    Latitude = reader.GetDouble(3),
+                    Longitude = reader.GetDouble(4),
+                    Address = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    IsAvailableTomorrow = reader.GetInt32(6) == 1,
+                    EstimatedPickupTime = reader.IsDBNull(7) ? null : reader.GetString(7)
+                },
+                null
+            );
+        }
+
+        public async Task<Passenger> GetPassengerByUserIdAsync(int userId)
+        {
+            var parameters = new Dictionary<string, object> { { "@UserID", userId } };
+
+            string query = @"
+                SELECT PassengerID, Name, Latitude, Longitude, Address, IsAvailableTomorrow, EstimatedPickupTime
+                FROM Passengers
+                WHERE UserID = @UserID";
+
+            return await _dbManager.ExecuteReaderSingleAsync<Passenger>(
+                query,
+                async reader => new Passenger
+                {
+                    Id = reader.GetInt32(0),
+                    UserId = userId,
+                    Name = reader.GetString(1),
+                    Latitude = reader.GetDouble(2),
+                    Longitude = reader.GetDouble(3),
+                    Address = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    IsAvailableTomorrow = reader.GetInt32(5) == 1,
+                    EstimatedPickupTime = reader.IsDBNull(6) ? null : reader.GetString(6)
+                },
+                parameters
+            );
+        }
+
+        public async Task<Passenger> GetPassengerByIdAsync(int passengerId)
+        {
+            var parameters = new Dictionary<string, object> { { "@PassengerID", passengerId } };
+
+            string query = @"
+                SELECT PassengerID, UserID, Name, Latitude, Longitude, Address, 
+                       IsAvailableTomorrow, EstimatedPickupTime
+                FROM Passengers
+                WHERE PassengerID = @PassengerID";
+
+            return await _dbManager.ExecuteReaderSingleAsync<Passenger>(
+                query,
+                async reader => new Passenger
+                {
+                    Id = reader.GetInt32(0),
+                    UserId = reader.GetInt32(1),
+                    Name = reader.GetString(2),
+                    Latitude = reader.GetDouble(3),
+                    Longitude = reader.GetDouble(4),
+                    Address = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    IsAvailableTomorrow = reader.GetInt32(6) == 1,
+                    EstimatedPickupTime = reader.IsDBNull(7) ? null : reader.GetString(7)
+                },
+                parameters
+            );
+        }
+
+        public async Task<bool> DeletePassengerAsync(int passengerId)
+        {
+            using (var transaction = _connection.BeginTransaction())
+            {
+                try
+                {
+                    await DeletePassengerAssignmentsAsync(passengerId, transaction);
+                    bool deleted = await DeletePassengerRecordAsync(passengerId, transaction);
+
+                    if (deleted)
+                    {
+                        transaction.Commit();
+                        return true;
+                    }
+                    else
+                    {
+                        transaction.Rollback();
+                        return false;
+                    }
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+        }
+
+        private async Task DeletePassengerAssignmentsAsync(int passengerId, SQLiteTransaction transaction)
+        {
+            string query = "DELETE FROM PassengerAssignments WHERE PassengerID = @PassengerID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        private async Task<bool> DeletePassengerRecordAsync(int passengerId, SQLiteTransaction transaction)
+        {
+            string query = "DELETE FROM Passengers WHERE PassengerID = @PassengerID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+                int result = await cmd.ExecuteNonQueryAsync();
+                return result > 0;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Service for destination-related database operations
+    /// </summary>
+    public class DestinationService
+    {
+        private readonly DatabaseManager _dbManager;
+
+        public DestinationService(DatabaseManager dbManager)
+        {
+            _dbManager = dbManager ?? throw new ArgumentNullException(nameof(dbManager));
+        }
+
+        public async Task<(int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime)>
+            GetDestinationAsync()
+        {
+            string query = @"
+                SELECT DestinationID, Name, Latitude, Longitude, Address, TargetArrivalTime
+                FROM Destination
+                ORDER BY DestinationID LIMIT 1";
+
+            var destination = await _dbManager.ExecuteReaderSingleAsync<(int, string, double, double, string, string)>(
+                query,
+                async reader => (
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetDouble(2),
+                    reader.GetDouble(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.GetString(5)
+                ),
+                null
+            );
+
+            // Return default values if no destination is found
+            return destination.Item1 != 0 ? destination : (0, "Default", 32.0741, 34.7922, null, "08:00:00");
+        }
+
+        public async Task<bool> UpdateDestinationAsync(string name, double latitude,
+            double longitude, string targetTime, string address = "")
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@Name", name },
+                { "@Latitude", latitude },
+                { "@Longitude", longitude },
+                { "@Address", address ?? "" },
+                { "@TargetArrivalTime", targetTime }
+            };
+
+            string query = @"
+                UPDATE Destination
+                SET Name = @Name, Latitude = @Latitude, Longitude = @Longitude, 
+                    Address = @Address, TargetArrivalTime = @TargetArrivalTime
+                WHERE DestinationID = (SELECT DestinationID FROM Destination ORDER BY DestinationID LIMIT 1)";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
+        }
+    }
+
+    /// <summary>
+    /// Service for route-related database operations
+    /// </summary>
+    public class RouteService
+    {
+        private readonly DatabaseManager _dbManager;
+        private readonly SQLiteConnection _connection;
+
+        public RouteService(DatabaseManager dbManager)
+        {
+            _dbManager = dbManager ?? throw new ArgumentNullException(nameof(dbManager));
+            _connection = dbManager.GetConnection();
+        }
+
+        public async Task<(Vehicle AssignedVehicle, DateTime? PickupTime)> GetPassengerAssignmentAsync(
+            int userId, string date)
+        {
+            var passengerService = new PassengerService(_dbManager);
+            var passenger = await passengerService.GetPassengerByUserIdAsync(userId);
+
+            if (passenger == null)
+            {
+                return (null, null);
             }
 
-            vehicle.AssignedPassengers = passengers;
-            return (vehicle, passengers, firstPickupTime);
-        }
-        /// <summary>
-        /// Gets the solution for a specific date
-        /// </summary>
-        public async Task<Solution> GetSolutionForDateAsync(string date)
-        {
-            var solution = new Solution { Vehicles = new List<Vehicle>() };
+            int routeId = await GetRouteIdForDateAsync(date);
 
-            // Get the route ID for the specific date
-            int routeId;
-            using (var cmd = new SQLiteCommand(connection))
+            if (routeId <= 0)
             {
-                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
+                return (null, null);
+            }
+
+            var assignment = await FindPassengerAssignmentAsync(routeId, passenger.Id);
+
+            if (assignment.VehicleId <= 0)
+            {
+                return (null, null);
+            }
+
+            string pickupTime = assignment.PickupTime ?? passenger.EstimatedPickupTime;
+            var vehicle = await GetAssignedVehicleAsync(assignment.VehicleId);
+
+            DateTime? pickupDateTime = null;
+            if (!string.IsNullOrEmpty(pickupTime))
+            {
+                pickupDateTime = DateTime.Parse(pickupTime);
+            }
+
+            return (vehicle, pickupDateTime);
+        }
+
+        private async Task<(int VehicleId, string PickupTime)> FindPassengerAssignmentAsync(
+            int routeId, int passengerId)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@RouteID", routeId },
+                { "@PassengerID", passengerId }
+            };
+
+            string query = @"
+                SELECT rd.VehicleID, pa.EstimatedPickupTime
+                FROM PassengerAssignments pa
+                JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
+                WHERE rd.RouteID = @RouteID AND pa.PassengerID = @PassengerID";
+
+            return await _dbManager.ExecuteReaderSingleAsync<(int, string)>(
+                query,
+                async reader => (
+                    reader.GetInt32(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1)
+                ),
+                parameters
+            );
+        }
+
+        private async Task<Vehicle> GetAssignedVehicleAsync(int vehicleId)
+        {
+            var parameters = new Dictionary<string, object> { { "@VehicleID", vehicleId } };
+
+            string query = @"
+                SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, 
+                       v.DepartureTime, u.Name
+                FROM Vehicles v
+                JOIN Users u ON v.UserID = u.UserID
+                WHERE v.VehicleID = @VehicleID";
+
+            return await _dbManager.ExecuteReaderSingleAsync<Vehicle>(
+                query,
+                async reader => new Vehicle
+                {
+                    Id = reader.GetInt32(0),
+                    Capacity = reader.GetInt32(1),
+                    StartLatitude = reader.GetDouble(2),
+                    StartLongitude = reader.GetDouble(3),
+                    StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    DepartureTime = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    DriverName = reader.GetString(6),
+                    Model = "Standard Vehicle",
+                    Color = "White",
+                    LicensePlate = $"V-{vehicleId:D4}"
+                },
+                parameters
+            );
+        }
+
+        public async Task<int> SaveSolutionAsync(Solution solution, string date)
+        {
+            using (var transaction = _connection.BeginTransaction())
+            {
+                try
+                {
+                    int routeId = await InsertRouteAsync(date, transaction);
+
+                    if (routeId <= 0)
+                    {
+                        transaction.Rollback();
+                        return -1;
+                    }
+
+                    foreach (var vehicle in solution.Vehicles)
+                    {
+                        if (vehicle.AssignedPassengers.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        await SaveVehicleRouteAsync(routeId, vehicle, transaction);
+                    }
+
+                    transaction.Commit();
+                    return routeId;
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+        }
+
+        private async Task<int> InsertRouteAsync(string date, SQLiteTransaction transaction)
+        {
+            string query = @"
+                INSERT INTO Routes (SolutionDate)
+                VALUES (@SolutionDate);
+                SELECT last_insert_rowid();";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
                 cmd.Parameters.AddWithValue("@SolutionDate", date);
+                object result = await cmd.ExecuteScalarAsync();
+
+                if (result != null && int.TryParse(result.ToString(), out int routeId))
+                {
+                    return routeId;
+                }
+
+                return -1;
+            }
+        }
+
+        private async Task<int> SaveVehicleRouteAsync(int routeId, Vehicle vehicle, SQLiteTransaction transaction)
+        {
+            int routeDetailId = await InsertRouteDetailAsync(routeId, vehicle, transaction);
+
+            if (routeDetailId <= 0)
+            {
+                return -1;
+            }
+
+            await UpdateVehicleDepartureTimeAsync(vehicle.Id, vehicle.DepartureTime, transaction);
+
+            for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
+            {
+                var passenger = vehicle.AssignedPassengers[i];
+                await SavePassengerAssignmentAsync(routeDetailId, passenger, i + 1, transaction);
+                await UpdatePassengerPickupTimeAsync(passenger.Id, passenger.EstimatedPickupTime, transaction);
+            }
+
+            return routeDetailId;
+        }
+
+        private async Task<int> InsertRouteDetailAsync(int routeId, Vehicle vehicle, SQLiteTransaction transaction)
+        {
+            string query = @"
+                INSERT INTO RouteDetails (RouteID, VehicleID, TotalDistance, TotalTime, DepartureTime)
+                VALUES (@RouteID, @VehicleID, @TotalDistance, @TotalTime, @DepartureTime);
+                SELECT last_insert_rowid();";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@RouteID", routeId);
+                cmd.Parameters.AddWithValue("@VehicleID", vehicle.Id);
+                cmd.Parameters.AddWithValue("@TotalDistance", vehicle.TotalDistance);
+                cmd.Parameters.AddWithValue("@TotalTime", vehicle.TotalTime);
+                cmd.Parameters.AddWithValue("@DepartureTime",
+                    vehicle.DepartureTime != null ? (object)vehicle.DepartureTime : DBNull.Value);
 
                 object result = await cmd.ExecuteScalarAsync();
-                if (result == null || !int.TryParse(result.ToString(), out routeId))
-                {
-                    return null;
-                }
-            }
 
-            // Get all route details for this route
-            var routeDetails = new Dictionary<int, (int VehicleId, double TotalDistance, double TotalTime, string DepartureTime)>();
-            using (var cmd = new SQLiteCommand(connection))
+                if (result != null && int.TryParse(result.ToString(), out int routeDetailId))
+                {
+                    return routeDetailId;
+                }
+
+                return -1;
+            }
+        }
+
+        private async Task UpdateVehicleDepartureTimeAsync(int vehicleId, string departureTime,
+            SQLiteTransaction transaction)
+        {
+            string query = @"
+                UPDATE Vehicles 
+                SET DepartureTime = @DepartureTime
+                WHERE VehicleID = @VehicleID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
             {
-                cmd.CommandText = "SELECT RouteDetailID, VehicleID, TotalDistance, TotalTime, DepartureTime FROM RouteDetails WHERE RouteID = @RouteID";
-                cmd.Parameters.AddWithValue("@RouteID", routeId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        int routeDetailId = reader.GetInt32(0);
-                        string departureTime = reader.IsDBNull(4) ? null : reader.GetString(4);
-
-                        routeDetails[routeDetailId] = (
-                            reader.GetInt32(1),
-                            reader.GetDouble(2),
-                            reader.GetDouble(3),
-                            departureTime
-                        );
-                    }
-                }
+                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
+                cmd.Parameters.AddWithValue("@DepartureTime",
+                    departureTime != null ? (object)departureTime : DBNull.Value);
+                await cmd.ExecuteNonQueryAsync();
             }
+        }
+
+        private async Task SavePassengerAssignmentAsync(int routeDetailId, Passenger passenger,
+            int stopOrder, SQLiteTransaction transaction)
+        {
+            string query = @"
+                INSERT INTO PassengerAssignments (RouteDetailID, PassengerID, StopOrder, EstimatedPickupTime)
+                VALUES (@RouteDetailID, @PassengerID, @StopOrder, @EstimatedPickupTime)";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
+                cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
+                cmd.Parameters.AddWithValue("@StopOrder", stopOrder);
+                cmd.Parameters.AddWithValue("@EstimatedPickupTime",
+                    !string.IsNullOrEmpty(passenger.EstimatedPickupTime) ?
+                    (object)passenger.EstimatedPickupTime : DBNull.Value);
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        private async Task UpdatePassengerPickupTimeAsync(int passengerId, string pickupTime,
+            SQLiteTransaction transaction)
+        {
+            string query = @"
+                UPDATE Passengers 
+                SET EstimatedPickupTime = @EstimatedPickupTime
+                WHERE PassengerID = @PassengerID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+                cmd.Parameters.AddWithValue("@EstimatedPickupTime",
+                    !string.IsNullOrEmpty(pickupTime) ? (object)pickupTime : DBNull.Value);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        public async Task<Solution> GetSolutionForDateAsync(string date)
+        {
+            int routeId = await GetRouteIdForDateAsync(date);
+
+            if (routeId <= 0)
+            {
+                return null;
+            }
+
+            var solution = new Solution { Vehicles = new List<Vehicle>() };
+            var routeDetails = await GetRouteDetailsAsync(routeId);
 
             if (routeDetails.Count == 0)
             {
                 return null;
             }
 
-            // Get all vehicles first
-            var vehicles = await GetAllVehiclesAsync();
-            var vehicleMap = vehicles.ToDictionary(v => v.Id);
+            var vehicles = await LoadVehiclesForRouteAsync(routeDetails);
+            solution.Vehicles = vehicles;
 
-            // Get passenger assignments
+            return solution;
+        }
+
+        private async Task<int> GetRouteIdForDateAsync(string date)
+        {
+            var parameters = new Dictionary<string, object> { { "@SolutionDate", date } };
+
+            string query = @"
+                SELECT RouteID 
+                FROM Routes 
+                WHERE SolutionDate = @SolutionDate 
+                ORDER BY GeneratedTime DESC 
+                LIMIT 1";
+
+            return await _dbManager.ExecuteScalarAsync<int>(query, parameters);
+        }
+
+        private async Task<Dictionary<int, (int VehicleId, double TotalDistance, double TotalTime, string DepartureTime)>>
+            GetRouteDetailsAsync(int routeId)
+        {
+            var parameters = new Dictionary<string, object> { { "@RouteID", routeId } };
+
+            string query = @"
+                SELECT RouteDetailID, VehicleID, TotalDistance, TotalTime, DepartureTime 
+                FROM RouteDetails 
+                WHERE RouteID = @RouteID";
+
+            var routeDetails = await _dbManager.ExecuteReaderAsync<(int, int, double, double, string)>(
+                query,
+                async reader => (
+                    reader.GetInt32(0),
+                    reader.GetInt32(1),
+                    reader.GetDouble(2),
+                    reader.GetDouble(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4)
+                ),
+                parameters
+            );
+
+            var result = new Dictionary<int, (int, double, double, string)>();
+
+            foreach (var detail in routeDetails)
+            {
+                result[detail.Item1] = (detail.Item2, detail.Item3, detail.Item4, detail.Item5);
+            }
+
+            return result;
+        }
+
+        private async Task<List<Vehicle>> LoadVehiclesForRouteAsync(
+            Dictionary<int, (int VehicleId, double TotalDistance, double TotalTime, string DepartureTime)> routeDetails)
+        {
+            var vehicleService = new VehicleService(_dbManager);
+            var vehicles = await vehicleService.GetAllVehiclesAsync();
+            var vehicleMap = vehicles.ToDictionary(v => v.Id);
+            var result = new List<Vehicle>();
+
             foreach (var detail in routeDetails)
             {
                 int vehicleId = detail.Value.VehicleId;
@@ -1606,190 +1777,193 @@ namespace RideMatchProject.Services
                 vehicle.TotalTime = detail.Value.TotalTime;
                 vehicle.DepartureTime = detail.Value.DepartureTime;
 
-                // Get assigned passengers for this route detail
-                using (var cmd = new SQLiteCommand(connection))
-                {
-                    cmd.CommandText = @"
-                        SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
-                               p.Name, p.Latitude, p.Longitude, p.Address
-                        FROM PassengerAssignments pa
-                        JOIN Passengers p ON pa.PassengerID = p.PassengerID
-                        WHERE pa.RouteDetailID = @RouteDetailID
-                        ORDER BY pa.StopOrder";
-                    cmd.Parameters.AddWithValue("@RouteDetailID", detail.Key);
-
-                    using (var reader = await cmd.ExecuteReaderAsync())
-                    {
-                        while (await reader.ReadAsync())
-                        {
-                            var passenger = new Passenger
-                            {
-                                Id = reader.GetInt32(0),
-                                Name = reader.GetString(3),
-                                Latitude = reader.GetDouble(4),
-                                Longitude = reader.GetDouble(5),
-                                Address = reader.IsDBNull(6) ? null : reader.GetString(6),
-                                EstimatedPickupTime = reader.IsDBNull(2) ? null : reader.GetString(2)
-                            };
-
-                            vehicle.AssignedPassengers.Add(passenger);
-                        }
-                    }
-                }
-
-                // Add vehicle to solution
-                solution.Vehicles.Add(vehicle);
+                await LoadPassengersForVehicleAsync(detail.Key, vehicle);
+                result.Add(vehicle);
             }
 
-            return solution;
+            return result;
         }
 
-        /// <summary>
-        /// Gets passenger assignment and vehicle for a specific date
-        /// </summary>
-        public async Task<(Vehicle AssignedVehicle, DateTime? PickupTime)> GetPassengerAssignmentAsync(int userId, string date)
+        private async Task LoadPassengersForVehicleAsync(int routeDetailId, Vehicle vehicle)
         {
-            // Get passenger first
-            var passenger = await GetPassengerByUserIdAsync(userId);
-            if (passenger == null)
-            {
-                return (null, null);
-            }
+            var parameters = new Dictionary<string, object> { { "@RouteDetailID", routeDetailId } };
 
-            // Get route for this date
-            int routeId;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT RouteID FROM Routes WHERE SolutionDate = @SolutionDate ORDER BY GeneratedTime DESC LIMIT 1";
-                cmd.Parameters.AddWithValue("@SolutionDate", date);
+            string query = @"
+                SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
+                       p.Name, p.Latitude, p.Longitude, p.Address
+                FROM PassengerAssignments pa
+                JOIN Passengers p ON pa.PassengerID = p.PassengerID
+                WHERE pa.RouteDetailID = @RouteDetailID
+                ORDER BY pa.StopOrder";
 
-                object result = await cmd.ExecuteScalarAsync();
-                if (result == null || !int.TryParse(result.ToString(), out routeId))
+            var passengers = await _dbManager.ExecuteReaderAsync<Passenger>(
+                query,
+                async reader => new Passenger
                 {
-                    return (null, null);
-                }
-            }
+                    Id = reader.GetInt32(0),
+                    Name = reader.GetString(3),
+                    Latitude = reader.GetDouble(4),
+                    Longitude = reader.GetDouble(5),
+                    Address = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    EstimatedPickupTime = reader.IsDBNull(2) ? null : reader.GetString(2)
+                },
+                parameters
+            );
 
-            // Find passenger assignment
-            int vehicleId = 0;
-            string pickupTime = null;
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                    SELECT rd.VehicleID, pa.EstimatedPickupTime
-                    FROM PassengerAssignments pa
-                    JOIN RouteDetails rd ON pa.RouteDetailID = rd.RouteDetailID
-                    WHERE rd.RouteID = @RouteID AND pa.PassengerID = @PassengerID";
-                cmd.Parameters.AddWithValue("@RouteID", routeId);
-                cmd.Parameters.AddWithValue("@PassengerID", passenger.Id);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        vehicleId = reader.GetInt32(0);
-                        pickupTime = reader.IsDBNull(1) ? null : reader.GetString(1);
-                    }
-                    else
-                    {
-                        return (null, null);
-                    }
-                }
-            }
-
-            // If no pickup time in assignment, check passenger record
-            if (string.IsNullOrEmpty(pickupTime))
-            {
-                pickupTime = passenger.EstimatedPickupTime;
-            }
-
-            // Get vehicle details
-            Vehicle vehicle = null;
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                   SELECT v.VehicleID, v.Capacity, v.StartLatitude, v.StartLongitude, v.StartAddress, 
-                          v.DepartureTime, u.Name
-                   FROM Vehicles v
-                   JOIN Users u ON v.UserID = u.UserID
-                   WHERE v.VehicleID = @VehicleID";
-                cmd.Parameters.AddWithValue("@VehicleID", vehicleId);
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        vehicle = new Vehicle
-                        {
-                            Id = reader.GetInt32(0),
-                            Capacity = reader.GetInt32(1),
-                            StartLatitude = reader.GetDouble(2),
-                            StartLongitude = reader.GetDouble(3),
-                            StartAddress = reader.IsDBNull(4) ? null : reader.GetString(4),
-                            DepartureTime = reader.IsDBNull(5) ? null : reader.GetString(5),
-                            DriverName = reader.GetString(6),
-                            // Set default values for UI display properties
-                            Model = "Standard Vehicle",
-                            Color = "White",
-                            LicensePlate = $"V-{vehicleId:D4}"
-                        };
-                    }
-                }
-            }
-
-            DateTime? pickupDateTime = null;
-            if (pickupTime != null)
-            {
-                pickupDateTime = DateTime.Parse(pickupTime);
-            }
-            return (vehicle, pickupDateTime);
+            vehicle.AssignedPassengers = passengers;
         }
 
-        /// <summary>
-        /// Updates the estimated pickup times for a route
-        /// </summary>
-        public async Task<bool> UpdatePickupTimesAsync(int routeDetailId, Dictionary<int, string> passengerPickupTimes)
+        public async Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)>
+            GetDriverRouteAsync(int userId, string date)
         {
-            using (var transaction = connection.BeginTransaction())
+            var vehicleService = new VehicleService(_dbManager);
+            var vehicle = await vehicleService.GetVehicleByUserIdAsync(userId);
+
+            if (vehicle == null)
+            {
+                return (null, null, null);
+            }
+
+            int routeId = await GetRouteIdForDateAsync(date);
+
+            if (routeId <= 0)
+            {
+                return (vehicle, new List<Passenger>(), null);
+            }
+
+            var routeDetail = await GetRouteDetailForVehicleAsync(routeId, vehicle.Id);
+
+            if (routeDetail.Item1 <= 0)
+            {
+                return (vehicle, new List<Passenger>(), null);
+            }
+
+            vehicle.TotalDistance = routeDetail.Item2;
+            vehicle.TotalTime = routeDetail.Item3;
+            vehicle.DepartureTime = routeDetail.Item4;
+
+            var passengers = await GetPassengersForRouteDetailAsync(routeDetail.Item1);
+            vehicle.AssignedPassengers = passengers;
+
+            DateTime? firstPickupTime = CalculateFirstPickupTime(passengers, vehicle.DepartureTime);
+
+            return (vehicle, passengers, firstPickupTime);
+        }
+
+        private async Task<(int RouteDetailId, double TotalDistance, double TotalTime, string DepartureTime)>
+            GetRouteDetailForVehicleAsync(int routeId, int vehicleId)
+        {
+            var parameters = new Dictionary<string, object>
+            {
+                { "@RouteID", routeId },
+                { "@VehicleID", vehicleId }
+            };
+
+            string query = @"
+                SELECT RouteDetailID, TotalDistance, TotalTime, DepartureTime
+                FROM RouteDetails 
+                WHERE RouteID = @RouteID AND VehicleID = @VehicleID";
+
+            return await _dbManager.ExecuteReaderSingleAsync<(int, double, double, string)>(
+                query,
+                async reader => (
+                    reader.GetInt32(0),
+                    reader.GetDouble(1),
+                    reader.GetDouble(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3)
+                ),
+                parameters
+            );
+        }
+
+        private async Task<List<Passenger>> GetPassengersForRouteDetailAsync(int routeDetailId)
+        {
+            var parameters = new Dictionary<string, object> { { "@RouteDetailID", routeDetailId } };
+
+            string query = @"
+                SELECT pa.PassengerID, pa.StopOrder, pa.EstimatedPickupTime, 
+                       p.Name, p.Latitude, p.Longitude, p.Address
+                FROM PassengerAssignments pa
+                JOIN Passengers p ON pa.PassengerID = p.PassengerID
+                WHERE pa.RouteDetailID = @RouteDetailID
+                ORDER BY pa.StopOrder";
+
+            return await _dbManager.ExecuteReaderAsync<Passenger>(
+                query,
+                async reader => new Passenger
+                {
+                    Id = reader.GetInt32(0),
+                    Name = reader.GetString(3),
+                    Latitude = reader.GetDouble(4),
+                    Longitude = reader.GetDouble(5),
+                    Address = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    EstimatedPickupTime = reader.IsDBNull(2) ? null : reader.GetString(2)
+                },
+                parameters
+            );
+        }
+
+        private DateTime? CalculateFirstPickupTime(List<Passenger> passengers, string departureTime)
+        {
+            if (passengers.Count == 0)
+            {
+                return null;
+            }
+
+            // Try to get pickup time from first passenger
+            if (!string.IsNullOrEmpty(passengers[0].EstimatedPickupTime))
             {
                 try
                 {
-                    using (var cmd = new SQLiteCommand(connection))
+                    return DateTime.Parse(passengers[0].EstimatedPickupTime);
+                }
+                catch
+                {
+                    // Continue if parsing fails
+                }
+            }
+
+            // If no pickup time available, estimate based on departure time
+            if (!string.IsNullOrEmpty(departureTime))
+            {
+                try
+                {
+                    DateTime departure = DateTime.Parse(departureTime);
+                    DateTime estimatedPickup = departure.AddMinutes(15);
+
+                    if (string.IsNullOrEmpty(passengers[0].EstimatedPickupTime))
                     {
-                        cmd.Transaction = transaction;
-                        cmd.CommandText = @"
-                           UPDATE PassengerAssignments
-                           SET EstimatedPickupTime = @PickupTime
-                           WHERE RouteDetailID = @RouteDetailID AND PassengerID = @PassengerID";
+                        passengers[0].EstimatedPickupTime = estimatedPickup.ToString("HH:mm");
+                    }
 
-                        foreach (var entry in passengerPickupTimes)
-                        {
-                            cmd.Parameters.Clear();
-                            cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
-                            cmd.Parameters.AddWithValue("@PassengerID", entry.Key);
-                            cmd.Parameters.AddWithValue("@PickupTime", entry.Value);
-                            await cmd.ExecuteNonQueryAsync();
+                    return estimatedPickup;
+                }
+                catch
+                {
+                    // Continue if parsing fails
+                }
+            }
 
-                            // Also update the passenger record
-                            using (var passengerCmd = new SQLiteCommand(connection))
-                            {
-                                passengerCmd.Transaction = transaction;
-                                passengerCmd.CommandText = @"
-                                   UPDATE Passengers
-                                   SET EstimatedPickupTime = @PickupTime
-                                   WHERE PassengerID = @PassengerID";
-                                passengerCmd.Parameters.AddWithValue("@PassengerID", entry.Key);
-                                passengerCmd.Parameters.AddWithValue("@PickupTime", entry.Value);
-                                await passengerCmd.ExecuteNonQueryAsync();
-                            }
-                        }
+            return null;
+        }
+
+        public async Task<bool> UpdatePickupTimesAsync(int routeDetailId,
+            Dictionary<int, string> passengerPickupTimes)
+        {
+            using (var transaction = _connection.BeginTransaction())
+            {
+                try
+                {
+                    foreach (var entry in passengerPickupTimes)
+                    {
+                        await UpdateAssignmentPickupTimeAsync(routeDetailId, entry.Key, entry.Value, transaction);
+                        await UpdatePassengerPickupTimeAsync(entry.Key, entry.Value, transaction);
                     }
 
                     transaction.Commit();
                     return true;
                 }
-                catch (Exception)
+                catch
                 {
                     transaction.Rollback();
                     return false;
@@ -1797,280 +1971,493 @@ namespace RideMatchProject.Services
             }
         }
 
-        /// <summary>
-        /// Updates the vehicle and passenger availability for tomorrow
-        /// </summary>
+        private async Task UpdateAssignmentPickupTimeAsync(int routeDetailId, int passengerId,
+            string pickupTime, SQLiteTransaction transaction)
+        {
+            string query = @"
+                UPDATE PassengerAssignments
+                SET EstimatedPickupTime = @PickupTime
+                WHERE RouteDetailID = @RouteDetailID AND PassengerID = @PassengerID";
+
+            using (var cmd = new SQLiteCommand(query, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
+                cmd.Parameters.AddWithValue("@PassengerID", passengerId);
+                cmd.Parameters.AddWithValue("@PickupTime", pickupTime);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        public async Task<List<(int RouteId, DateTime GeneratedTime, int VehicleCount, int PassengerCount)>>
+            GetRouteHistoryAsync()
+        {
+            string query = @"
+                SELECT r.RouteID, r.SolutionDate, r.GeneratedTime, 
+                       COUNT(DISTINCT rd.VehicleID) as VehicleCount,
+                       COUNT(pa.PassengerID) as PassengerCount
+                FROM Routes r
+                LEFT JOIN RouteDetails rd ON r.RouteID = rd.RouteID
+                LEFT JOIN PassengerAssignments pa ON rd.RouteDetailID = pa.RouteDetailID
+                GROUP BY r.RouteID
+                ORDER BY r.SolutionDate DESC, r.GeneratedTime DESC
+                LIMIT 50";
+
+            return await _dbManager.ExecuteReaderAsync<(int, DateTime, int, int)>(
+                query,
+                async reader => (
+                    reader.GetInt32(0),
+                    DateTime.Parse(reader.GetString(2)),
+                    reader.GetInt32(3),
+                    reader.GetInt32(4)
+                ),
+                null
+            );
+        }
+
         public async Task ResetAvailabilityAsync()
         {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                // Reset all vehicles and passengers to available for tomorrow
-                cmd.CommandText = "UPDATE Vehicles SET IsAvailableTomorrow = 1";
-                await cmd.ExecuteNonQueryAsync();
+            string vehiclesQuery = "UPDATE Vehicles SET IsAvailableTomorrow = 1";
+            await _dbManager.ExecuteNonQueryAsync(vehiclesQuery, null);
 
-                cmd.CommandText = "UPDATE Passengers SET IsAvailableTomorrow = 1";
-                await cmd.ExecuteNonQueryAsync();
-            }
+            string passengersQuery = "UPDATE Passengers SET IsAvailableTomorrow = 1";
+            await _dbManager.ExecuteNonQueryAsync(passengersQuery, null);
         }
+    }
 
-        /// <summary>
-        /// Gets all routes for a specific date
-        /// </summary>
-        public async Task<List<(int RouteId, DateTime GeneratedTime, int VehicleCount, int PassengerCount)>> GetRouteHistoryAsync()
+    /// <summary>
+    /// Service for settings-related database operations
+    /// </summary>
+    public class SettingsService
+    {
+        private readonly DatabaseManager _dbManager;
+
+        public SettingsService(DatabaseManager dbManager)
         {
-            var result = new List<(int RouteId, DateTime GeneratedTime, int VehicleCount, int PassengerCount)>();
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                   SELECT r.RouteID, r.SolutionDate, r.GeneratedTime, 
-                          COUNT(DISTINCT rd.VehicleID) as VehicleCount,
-                          COUNT(pa.PassengerID) as PassengerCount
-                   FROM Routes r
-                   LEFT JOIN RouteDetails rd ON r.RouteID = rd.RouteID
-                   LEFT JOIN PassengerAssignments pa ON rd.RouteDetailID = pa.RouteDetailID
-                   GROUP BY r.RouteID
-                   ORDER BY r.SolutionDate DESC, r.GeneratedTime DESC
-                   LIMIT 50"; // Limit to recent routes
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        result.Add((
-                            reader.GetInt32(0),
-                            DateTime.Parse(reader.GetString(2)),
-                            reader.GetInt32(3),
-                            reader.GetInt32(4)
-                        ));
-                    }
-                }
-            }
-
-            return result;
+            _dbManager = dbManager ?? throw new ArgumentNullException(nameof(dbManager));
         }
-        #endregion
 
-        #region Scheduling Methods
-
-        /// <summary>
-        /// Saves scheduling settings to the database
-        /// </summary>
         public async Task SaveSchedulingSettingsAsync(bool isEnabled, DateTime scheduledTime)
         {
-            // First check if a settings table exists and create it if not
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                   CREATE TABLE IF NOT EXISTS Settings (
-                       SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
-                       SettingName TEXT NOT NULL UNIQUE,
-                       SettingValue TEXT NOT NULL
-                   )";
-                await cmd.ExecuteNonQueryAsync();
-            }
+            await EnsureSettingsTableExistsAsync();
 
-            // Save the settings
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                // Save isEnabled setting
-                cmd.CommandText = @"
-                   INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
-                   VALUES (@SettingName, @SettingValue)";
-                cmd.Parameters.AddWithValue("@SettingName", "SchedulingEnabled");
-                cmd.Parameters.AddWithValue("@SettingValue", isEnabled ? "1" : "0");
-                await cmd.ExecuteNonQueryAsync();
-
-                // Save scheduledTime setting
-                cmd.Parameters.Clear();
-                cmd.CommandText = @"
-                   INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
-                   VALUES (@SettingName, @SettingValue)";
-                cmd.Parameters.AddWithValue("@SettingName", "ScheduledTime");
-                cmd.Parameters.AddWithValue("@SettingValue", scheduledTime.ToString("HH:mm:ss"));
-                await cmd.ExecuteNonQueryAsync();
-            }
+            await SaveSettingAsync("SchedulingEnabled", isEnabled ? "1" : "0");
+            await SaveSettingAsync("ScheduledTime", scheduledTime.ToString("HH:mm:ss"));
         }
 
-        /// <summary>
-        /// Gets the scheduling settings
-        /// </summary>
         public async Task<(bool IsEnabled, DateTime ScheduledTime)> GetSchedulingSettingsAsync()
         {
-            bool isEnabled = false;
-            DateTime scheduledTime = DateTime.Parse("00:00:00"); // Default to midnight
-
-            // Check if the settings table exists
-            using (var cmd = new SQLiteCommand(connection))
+            if (!await TableExistsAsync("Settings"))
             {
-                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Settings'";
-                var result = await cmd.ExecuteScalarAsync();
-                if (result == null)
-                    return (isEnabled, scheduledTime); // Return defaults if table doesn't exist
+                return (false, DateTime.Parse("00:00:00"));
             }
 
-            // Get isEnabled setting
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'SchedulingEnabled'";
-                var result = await cmd.ExecuteScalarAsync();
-                if (result != null)
-                    isEnabled = result.ToString() == "1";
-            }
+            string enabledValue = await GetSettingAsync("SchedulingEnabled", "0");
+            bool isEnabled = enabledValue == "1";
 
-            // Get scheduledTime setting
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = 'ScheduledTime'";
-                var result = await cmd.ExecuteScalarAsync();
-                if (result != null)
-                    scheduledTime = DateTime.Parse(result.ToString());
-            }
+            string timeValue = await GetSettingAsync("ScheduledTime", "00:00:00");
+            DateTime scheduledTime = DateTime.Parse(timeValue);
 
             return (isEnabled, scheduledTime);
         }
 
-        /// <summary>
-        /// Gets the scheduling log entries
-        /// </summary>
-        public async Task<List<(DateTime RunTime, string Status, int RoutesGenerated, int PassengersAssigned)>> GetSchedulingLogAsync()
-        {
-            // First, check if the scheduling log table exists and create it if not
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                   CREATE TABLE IF NOT EXISTS SchedulingLog (
-                       LogID INTEGER PRIMARY KEY AUTOINCREMENT,
-                       RunTime TEXT NOT NULL,
-                       Status TEXT NOT NULL,
-                       RoutesGenerated INTEGER,
-                       PassengersAssigned INTEGER,
-                       ErrorMessage TEXT
-                   )";
-                await cmd.ExecuteNonQueryAsync();
-            }
-
-            // Now fetch the data
-            var result = new List<(DateTime RunTime, string Status, int RoutesGenerated, int PassengersAssigned)>();
-
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                   SELECT RunTime, Status, RoutesGenerated, PassengersAssigned
-                   FROM SchedulingLog
-                   ORDER BY RunTime DESC
-                   LIMIT 50"; // Limit to recent entries
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    while (await reader.ReadAsync())
-                    {
-                        result.Add((
-                            DateTime.Parse(reader.GetString(0)),
-                            reader.GetString(1),
-                            reader.GetInt32(2),
-                            reader.GetInt32(3)
-                        ));
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Logs a scheduling run
-        /// </summary>
-        public async Task LogSchedulingRunAsync(DateTime runTime, string status, int routesGenerated, int passengersAssigned, string errorMessage = null)
-        {
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-                   INSERT INTO SchedulingLog (RunTime, Status, RoutesGenerated, PassengersAssigned, ErrorMessage)
-                   VALUES (@RunTime, @Status, @RoutesGenerated, @PassengersAssigned, @ErrorMessage)";
-                cmd.Parameters.AddWithValue("@RunTime", runTime.ToString("yyyy-MM-dd HH:mm:ss"));
-                cmd.Parameters.AddWithValue("@Status", status);
-                cmd.Parameters.AddWithValue("@RoutesGenerated", routesGenerated);
-                cmd.Parameters.AddWithValue("@PassengersAssigned", passengersAssigned);
-                cmd.Parameters.AddWithValue("@ErrorMessage", errorMessage ?? (object)DBNull.Value);
-
-                await cmd.ExecuteNonQueryAsync();
-            }
-        }
-        #endregion
-
-        #region Helper Methods
-
-        /// <summary>
-        /// Simple password hashing for demo purposes
-        /// In a real app, use a proper password hashing library
-        /// </summary>
-        private string HashPassword(string password)
-        {
-            // This is NOT secure - use proper password hashing in production
-            using (var sha = System.Security.Cryptography.SHA256.Create())
-            {
-                var bytes = System.Text.Encoding.UTF8.GetBytes(password);
-                var hash = sha.ComputeHash(bytes);
-                return Convert.ToBase64String(hash);
-            }
-        }
-        // Add these methods to the DatabaseService class
-
-        /// <summary>
-        /// Saves a general setting to the database
-        /// </summary>
         public async Task<bool> SaveSettingAsync(string settingName, string settingValue)
         {
-            // Ensure Settings table exists
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS Settings (
-                SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
-                SettingName TEXT NOT NULL UNIQUE,
-                SettingValue TEXT NOT NULL
-            )";
-                await cmd.ExecuteNonQueryAsync();
-            }
+            await EnsureSettingsTableExistsAsync();
 
-            // Save the setting
-            using (var cmd = new SQLiteCommand(connection))
+            var parameters = new Dictionary<string, object>
             {
-                cmd.CommandText = @"
-            INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
-            VALUES (@SettingName, @SettingValue)";
-                cmd.Parameters.AddWithValue("@SettingName", settingName);
-                cmd.Parameters.AddWithValue("@SettingValue", settingValue);
+                { "@SettingName", settingName },
+                { "@SettingValue", settingValue }
+            };
 
-                int rowsAffected = await cmd.ExecuteNonQueryAsync();
-                return rowsAffected > 0;
-            }
+            string query = @"
+                INSERT OR REPLACE INTO Settings (SettingName, SettingValue)
+                VALUES (@SettingName, @SettingValue)";
+
+            int rowsAffected = await _dbManager.ExecuteNonQueryAsync(query, parameters);
+            return rowsAffected > 0;
         }
 
-        /// <summary>
-        /// Gets a general setting from the database
-        /// </summary>
         public async Task<string> GetSettingAsync(string settingName, string defaultValue = "")
         {
-            // Check if the settings table exists
-            using (var cmd = new SQLiteCommand(connection))
+            if (!await TableExistsAsync("Settings"))
             {
-                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='Settings'";
-                var result = await cmd.ExecuteScalarAsync();
-                if (result == null)
-                    return defaultValue; // Return default value if table doesn't exist
+                return defaultValue;
             }
 
-            // Get the setting
-            using (var cmd = new SQLiteCommand(connection))
-            {
-                cmd.CommandText = "SELECT SettingValue FROM Settings WHERE SettingName = @SettingName";
-                cmd.Parameters.AddWithValue("@SettingName", settingName);
+            var parameters = new Dictionary<string, object> { { "@SettingName", settingName } };
 
-                var result = await cmd.ExecuteScalarAsync();
-                return result != null ? result.ToString() : defaultValue;
-            }
+            string query = "SELECT SettingValue FROM Settings WHERE SettingName = @SettingName";
+
+            string value = await _dbManager.ExecuteScalarAsync<string>(query, parameters);
+            return !string.IsNullOrEmpty(value) ? value : defaultValue;
+        }
+
+        private async Task EnsureSettingsTableExistsAsync()
+        {
+            string query = @"
+                CREATE TABLE IF NOT EXISTS Settings (
+                    SettingID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    SettingName TEXT NOT NULL UNIQUE,
+                    SettingValue TEXT NOT NULL
+                )";
+
+            await _dbManager.ExecuteNonQueryAsync(query, null);
+        }
+
+        private async Task<bool> TableExistsAsync(string tableName)
+        {
+            var parameters = new Dictionary<string, object> { { "@TableName", tableName } };
+
+            string query = "SELECT name FROM sqlite_master WHERE type='table' AND name=@TableName";
+
+            string result = await _dbManager.ExecuteScalarAsync<string>(query, parameters);
+            return !string.IsNullOrEmpty(result);
+        }
+
+        public async Task LogSchedulingRunAsync(DateTime runTime, string status,
+            int routesGenerated, int passengersAssigned, string errorMessage = null)
+        {
+            await EnsureSchedulingLogTableExistsAsync();
+
+            var parameters = new Dictionary<string, object>
+            {
+                { "@RunTime", runTime.ToString("yyyy-MM-dd HH:mm:ss") },
+                { "@Status", status },
+                { "@RoutesGenerated", routesGenerated },
+                { "@PassengersAssigned", passengersAssigned },
+                { "@ErrorMessage", errorMessage }
+            };
+
+            string query = @"
+                INSERT INTO SchedulingLog (RunTime, Status, RoutesGenerated, PassengersAssigned, ErrorMessage)
+                VALUES (@RunTime, @Status, @RoutesGenerated, @PassengersAssigned, @ErrorMessage)";
+
+            await _dbManager.ExecuteNonQueryAsync(query, parameters);
+        }
+
+        public async Task<List<(DateTime RunTime, string Status, int RoutesGenerated, int PassengersAssigned)>>
+            GetSchedulingLogAsync()
+        {
+            await EnsureSchedulingLogTableExistsAsync();
+
+            string query = @"
+                SELECT RunTime, Status, RoutesGenerated, PassengersAssigned
+                FROM SchedulingLog
+                ORDER BY RunTime DESC
+                LIMIT 50";
+
+            return await _dbManager.ExecuteReaderAsync<(DateTime, string, int, int)>(
+                query,
+                async reader => (
+                    DateTime.Parse(reader.GetString(0)),
+                    reader.GetString(1),
+                    reader.GetInt32(2),
+                    reader.GetInt32(3)
+                ),
+                null
+            );
+        }
+
+        private async Task EnsureSchedulingLogTableExistsAsync()
+        {
+            string query = @"
+                CREATE TABLE IF NOT EXISTS SchedulingLog (
+                    LogID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    RunTime TEXT NOT NULL,
+                    Status TEXT NOT NULL,
+                    RoutesGenerated INTEGER,
+                    PassengersAssigned INTEGER,
+                    ErrorMessage TEXT
+                )";
+
+            await _dbManager.ExecuteNonQueryAsync(query, null);
+        }
+    }
+
+    /// <summary>
+    /// Main database service facade that provides access to all domain services
+    /// </summary>
+    public class DatabaseService : IDisposable
+    {
+        private readonly DatabaseManager _dbManager;
+        private readonly UserService _userService;
+        private readonly VehicleService _vehicleService;
+        private readonly PassengerService _passengerService;
+        private readonly DestinationService _destinationService;
+        private readonly RouteService _routeService;
+        private readonly SettingsService _settingsService;
+        private bool _disposed = false;
+
+        public DatabaseService(string dbFilePath = "ridematch.db")
+        {
+            _dbManager = new DatabaseManager(dbFilePath);
+            _userService = new UserService(_dbManager);
+            _vehicleService = new VehicleService(_dbManager);
+            _passengerService = new PassengerService(_dbManager);
+            _destinationService = new DestinationService(_dbManager);
+            _routeService = new RouteService(_dbManager);
+            _settingsService = new SettingsService(_dbManager);
+        }
+
+        public SQLiteConnection GetConnection()
+        {
+            return _dbManager.GetConnection();
+        }
+
+        #region User Methods
+
+        public Task<(bool Success, string UserType, int UserId)> AuthenticateUserAsync(
+            string username, string password)
+        {
+            return _userService.AuthenticateUserAsync(username, password);
+        }
+
+        public Task<int> AddUserAsync(string username, string password,
+            string userType, string name, string email = "", string phone = "")
+        {
+            return _userService.AddUserAsync(username, password, userType, name, email, phone);
+        }
+
+        public Task<bool> UpdateUserAsync(int userId, string name, string email, string phone)
+        {
+            return _userService.UpdateUserAsync(userId, name, email, phone);
+        }
+
+        public Task<bool> UpdateUserProfileAsync(int userId, string userType,
+            string name, string email, string phone)
+        {
+            return _userService.UpdateUserProfileAsync(userId, userType, name, email, phone);
+        }
+
+        public Task<bool> ChangePasswordAsync(int userId, string newPassword)
+        {
+            return _userService.ChangePasswordAsync(userId, newPassword);
+        }
+
+        public Task<(string Username, string UserType, string Name, string Email, string Phone)>
+            GetUserInfoAsync(int userId)
+        {
+            return _userService.GetUserInfoAsync(userId);
+        }
+
+        public Task<List<(int Id, string Username, string UserType, string Name, string Email, string Phone)>>
+            GetAllUsersAsync()
+        {
+            return _userService.GetAllUsersAsync();
+        }
+
+        public Task<bool> DeleteUserAsync(int userId)
+        {
+            return _userService.DeleteUserAsync(userId);
+        }
+
+        public Task<List<(int Id, string Username, string Name)>> GetUsersByTypeAsync(string userType)
+        {
+            return _userService.GetUsersByTypeAsync(userType);
+        }
+
+        #endregion
+
+        #region Vehicle Methods
+
+        public Task<int> AddVehicleAsync(int userId, int capacity,
+            double startLatitude, double startLongitude, string startAddress = "")
+        {
+            return _vehicleService.AddVehicleAsync(userId, capacity, startLatitude, startLongitude, startAddress);
+        }
+
+        public Task<bool> UpdateVehicleAsync(int vehicleId, int capacity,
+            double startLatitude, double startLongitude, string startAddress = "")
+        {
+            return _vehicleService.UpdateVehicleAsync(vehicleId, capacity, startLatitude, startLongitude, startAddress);
+        }
+
+        public Task<bool> UpdateVehicleAvailabilityAsync(int vehicleId, bool isAvailable)
+        {
+            return _vehicleService.UpdateVehicleAvailabilityAsync(vehicleId, isAvailable);
+        }
+
+        public Task<List<Vehicle>> GetAllVehiclesAsync()
+        {
+            return _vehicleService.GetAllVehiclesAsync();
+        }
+
+        public Task<List<Vehicle>> GetAvailableVehiclesAsync()
+        {
+            return _vehicleService.GetAvailableVehiclesAsync();
+        }
+
+        public Task<Vehicle> GetVehicleByUserIdAsync(int userId)
+        {
+            return _vehicleService.GetVehicleByUserIdAsync(userId);
+        }
+
+        public Task<Vehicle> GetVehicleByIdAsync(int vehicleId)
+        {
+            return _vehicleService.GetVehicleByIdAsync(vehicleId);
+        }
+
+        public Task<int> SaveDriverVehicleAsync(int userId, int capacity,
+            double startLatitude, double startLongitude, string startAddress = "")
+        {
+            return _vehicleService.SaveDriverVehicleAsync(userId, capacity, startLatitude, startLongitude, startAddress);
+        }
+
+        public Task<bool> UpdateVehicleCapacityAsync(int userId, int capacity)
+        {
+            return _vehicleService.SaveDriverVehicleAsync(userId, capacity, 0, 0, "").ContinueWith(t => t.Result > 0);
+        }
+
+        public Task<bool> UpdateVehicleLocationAsync(int userId, double latitude, double longitude, string address = "")
+        {
+            return _vehicleService.SaveDriverVehicleAsync(userId, 4, latitude, longitude, address)
+                .ContinueWith(t => t.Result > 0);
+        }
+
+        public Task<bool> DeleteVehicleAsync(int vehicleId)
+        {
+            return _vehicleService.DeleteVehicleAsync(vehicleId);
+        }
+
+        #endregion
+
+        #region Passenger Methods
+
+        public Task<int> AddPassengerAsync(int userId, string name,
+            double latitude, double longitude, string address = "")
+        {
+            return _passengerService.AddPassengerAsync(userId, name, latitude, longitude, address);
+        }
+
+        public Task<bool> UpdatePassengerAsync(int passengerId, string name,
+            double latitude, double longitude, string address = "")
+        {
+            return _passengerService.UpdatePassengerAsync(passengerId, name, latitude, longitude, address);
+        }
+
+        public Task<bool> UpdatePassengerAvailabilityAsync(int passengerId, bool isAvailable)
+        {
+            return _passengerService.UpdatePassengerAvailabilityAsync(passengerId, isAvailable);
+        }
+
+        public Task<List<Passenger>> GetAvailablePassengersAsync()
+        {
+            return _passengerService.GetAvailablePassengersAsync();
+        }
+
+        public Task<List<Passenger>> GetAllPassengersAsync()
+        {
+            return _passengerService.GetAllPassengersAsync();
+        }
+
+        public Task<Passenger> GetPassengerByUserIdAsync(int userId)
+        {
+            return _passengerService.GetPassengerByUserIdAsync(userId);
+        }
+
+        public Task<Passenger> GetPassengerByIdAsync(int passengerId)
+        {
+            return _passengerService.GetPassengerByIdAsync(passengerId);
+        }
+
+        public Task<bool> DeletePassengerAsync(int passengerId)
+        {
+            return _passengerService.DeletePassengerAsync(passengerId);
+        }
+
+        #endregion
+
+        #region Destination Methods
+
+        public Task<(int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime)>
+            GetDestinationAsync()
+        {
+            return _destinationService.GetDestinationAsync();
+        }
+
+        public Task<bool> UpdateDestinationAsync(string name, double latitude,
+            double longitude, string targetTime, string address = "")
+        {
+            return _destinationService.UpdateDestinationAsync(name, latitude, longitude, targetTime, address);
+        }
+
+        #endregion
+
+        #region Route Methods
+
+        public Task<int> SaveSolutionAsync(Solution solution, string date)
+        {
+            return _routeService.SaveSolutionAsync(solution, date);
+        }
+
+        public Task<Solution> GetSolutionForDateAsync(string date)
+        {
+            return _routeService.GetSolutionForDateAsync(date);
+        }
+
+        public Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)>
+            GetDriverRouteAsync(int userId, string date)
+        {
+            return _routeService.GetDriverRouteAsync(userId, date);
+        }
+
+        public Task<(Vehicle AssignedVehicle, DateTime? PickupTime)> GetPassengerAssignmentAsync(int userId, string date)
+        {
+            return _routeService.GetPassengerAssignmentAsync(userId, date);
+        }
+
+        public Task<bool> UpdatePickupTimesAsync(int routeDetailId, Dictionary<int, string> passengerPickupTimes)
+        {
+            return _routeService.UpdatePickupTimesAsync(routeDetailId, passengerPickupTimes);
+        }
+
+        public Task ResetAvailabilityAsync()
+        {
+            return _routeService.ResetAvailabilityAsync();
+        }
+
+        public Task<List<(int RouteId, DateTime GeneratedTime, int VehicleCount, int PassengerCount)>>
+            GetRouteHistoryAsync()
+        {
+            return _routeService.GetRouteHistoryAsync();
+        }
+
+        #endregion
+
+        #region Settings Methods
+
+        public Task SaveSchedulingSettingsAsync(bool isEnabled, DateTime scheduledTime)
+        {
+            return _settingsService.SaveSchedulingSettingsAsync(isEnabled, scheduledTime);
+        }
+
+        public Task<(bool IsEnabled, DateTime ScheduledTime)> GetSchedulingSettingsAsync()
+        {
+            return _settingsService.GetSchedulingSettingsAsync();
+        }
+
+        public Task LogSchedulingRunAsync(DateTime runTime, string status,
+            int routesGenerated, int passengersAssigned, string errorMessage = null)
+        {
+            return _settingsService.LogSchedulingRunAsync(runTime, status,
+                routesGenerated, passengersAssigned, errorMessage);
+        }
+
+        public Task<List<(DateTime RunTime, string Status, int RoutesGenerated, int PassengersAssigned)>>
+            GetSchedulingLogAsync()
+        {
+            return _settingsService.GetSchedulingLogAsync();
+        }
+
+        public Task<bool> SaveSettingAsync(string settingName, string settingValue)
+        {
+            return _settingsService.SaveSettingAsync(settingName, settingValue);
+        }
+
+        public Task<string> GetSettingAsync(string settingName, string defaultValue = "")
+        {
+            return _settingsService.GetSettingAsync(settingName, defaultValue);
         }
 
         #endregion
@@ -2085,15 +2472,13 @@ namespace RideMatchProject.Services
 
         protected virtual void Dispose(bool disposing)
         {
-            if (!disposed)
+            if (!_disposed)
             {
                 if (disposing)
                 {
-                    connection?.Close();
-                    connection?.Dispose();
+                    _dbManager?.Dispose();
                 }
-
-                disposed = true;
+                _disposed = true;
             }
         }
 
