@@ -29,9 +29,6 @@ namespace RideMatchProject.DriverClasses
             this.username = username;
         }
 
-
-        // In DriverDataManager class in DriverForm.cs
-
         public async Task LoadDriverDataAsync()
         {
             try
@@ -44,22 +41,24 @@ namespace RideMatchProject.DriverClasses
                     return;
                 }
 
+                // Get the destination tuple
                 var destination = await dbService.GetDestinationAsync();
 
                 // Use the common helper to determine which date to query
+                // Access tuple elements correctly
                 string queryDate = RouteScheduleHelper.GetRouteQueryDate(destination.TargetTime);
 
                 // The GetDriverRouteAsync returns a tuple (Vehicle, List<Passenger>, DateTime?)
                 var routeData = await dbService.GetDriverRouteAsync(userId, queryDate);
 
                 // Properly unpack the tuple
-                if (routeData.Item1 != null)
+                if (routeData.Vehicle != null)
                 {
-                    Vehicle = routeData.Item1;
+                    Vehicle = routeData.Vehicle;
                 }
 
-                AssignedPassengers = routeData.Item2 ?? new List<Passenger>();
-                PickupTime = routeData.Item3;
+                AssignedPassengers = routeData.Passengers ?? new List<Passenger>();
+                PickupTime = routeData.PickupTime;
             }
             catch (Exception ex)
             {
@@ -67,6 +66,7 @@ namespace RideMatchProject.DriverClasses
                 throw;
             }
         }
+
         private void InitializeDefaultVehicle()
         {
             Vehicle = new Vehicle
@@ -76,18 +76,6 @@ namespace RideMatchProject.DriverClasses
                 IsAvailableTomorrow = true,
                 DriverName = username
             };
-        }
-
-
-        private void ProcessRouteData(dynamic routeData)
-        {
-            if (routeData.Vehicle != null)
-            {
-                Vehicle = routeData.Vehicle;
-            }
-
-            AssignedPassengers = routeData.Passengers ?? new List<Passenger>();
-            PickupTime = routeData.PickupTime;
         }
 
         public async Task<bool> UpdateVehicleAvailabilityAsync(bool isAvailable)

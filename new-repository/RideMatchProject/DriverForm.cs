@@ -19,10 +19,10 @@ namespace RideMatchProject
     /// </summary>
     public partial class DriverForm : Form
     {
-        private DriverDataManager dataManager;
-        private DriverUIManager uiManager;
-        private DriverMapManager mapManager;
-        private DriverLocationManager locationManager;
+        private DriverDataManager _dataManager;
+        private DriverUIManager _uiManager;
+        private DriverMapManager _mapManager;
+        private DriverLocationManager _locationManager;
 
         public DriverForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
@@ -40,10 +40,10 @@ namespace RideMatchProject
 
         private void InitializeManagers(DatabaseService dbService, MapService mapService, int userId, string username)
         {
-            dataManager = new DriverDataManager(dbService, userId, username);
-            mapManager = new DriverMapManager(mapService, dbService);
-            locationManager = new DriverLocationManager(mapService, dataManager);
-            uiManager = new DriverUIManager(this, dataManager, mapManager, locationManager,username);
+            _dataManager = new DriverDataManager(dbService, userId, username);
+            _mapManager = new DriverMapManager(mapService, dbService);
+            _locationManager = new DriverLocationManager(mapService, _dataManager);
+            _uiManager = new DriverUIManager(this, _dataManager, _mapManager, _locationManager, username);
         }
 
         protected override void OnLoad(EventArgs e)
@@ -52,11 +52,14 @@ namespace RideMatchProject
 
             try
             {
-                uiManager.InitializeUI();
-                mapManager.InitializeMap(uiManager.MapControl, 32.0741, 34.7922);
+                _uiManager.InitializeUI();
+                _mapManager.InitializeMap(_uiManager.MapControl, 32.0741, 34.7922);
 
-                Task.Run(async () => await LoadDataAndRefreshUI())
-                    .ContinueWith(HandleLoadingError, TaskContinuationOptions.OnlyOnFaulted);
+                // Use SafeTaskRun to properly handle errors in async operations
+                ThreadUtils.SafeTaskRun(
+                    async () => await LoadDataAndRefreshUI(),
+                    ex => HandleLoadingError(ex)
+                );
             }
             catch (Exception ex)
             {
@@ -70,30 +73,27 @@ namespace RideMatchProject
             // This is intentionally left empty as we use OnLoad instead
         }
 
-        private void HandleLoadingError(Task task)
+        private void HandleLoadingError(Exception ex)
         {
-            if (task.Exception == null) return;
-
-            this.Invoke(new Action(() => {
-                ShowErrorMessage("Error loading driver data",
-                    task.Exception.InnerException?.Message ?? task.Exception.Message);
-            }));
+            ThreadUtils.ShowErrorMessage(this,
+                $"Error loading driver data: {(ex.InnerException?.Message ?? ex.Message)}",
+                "Error");
         }
 
         private async Task LoadDataAndRefreshUI()
         {
-            await dataManager.LoadDriverDataAsync();
+            await _dataManager.LoadDriverDataAsync();
 
-            this.Invoke(new Action(() => {
-                uiManager.RefreshUI();
-                mapManager.DisplayRouteOnMap(dataManager.Vehicle, dataManager.AssignedPassengers);
-            }));
+            // Use ThreadUtils to ensure UI updates happen on the UI thread
+            ThreadUtils.ExecuteOnUIThread(this, () => {
+                _uiManager.RefreshUI();
+                _mapManager.DisplayRouteOnMap(_dataManager.Vehicle, _dataManager.AssignedPassengers);
+            });
         }
 
         private void ShowErrorMessage(string title, string message)
         {
-            MessageBox.Show($"{title}: {message}",
-                "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ThreadUtils.ShowErrorMessage(this, message, title);
         }
     }
 
@@ -107,11 +107,6 @@ namespace RideMatchProject
         public DateTime? PickupTime { get; set; }
     }
 
-   
-
- 
-
-
     /// <summary>
     /// Model for destination location
     /// </summary>
@@ -122,6 +117,4 @@ namespace RideMatchProject
         public string Address { get; set; }
         public string TargetTime { get; set; }
     }
-
-   
 }

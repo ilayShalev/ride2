@@ -98,6 +98,19 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AdminClasses\AdminDataManager.cs" />
+    <Compile Include="AdminClasses\AdminUIFactory.cs" />
+    <Compile Include="AdminClasses\DestinationTabController.cs" />
+    <Compile Include="AdminClasses\DriversTabController.cs" />
+    <Compile Include="AdminClasses\MessageDisplayer.cs" />
+    <Compile Include="AdminClasses\PassengersTabController.cs" />
+    <Compile Include="AdminClasses\RouteDetailsFormatter.cs" />
+    <Compile Include="AdminClasses\RoutesTabController.cs" />
+    <Compile Include="AdminClasses\SchedulingService.cs" />
+    <Compile Include="AdminClasses\SchedulingTabController.cs" />
+    <Compile Include="AdminClasses\TabControllerBase.cs" />
+    <Compile Include="AdminClasses\TabFactory.cs" />
+    <Compile Include="AdminClasses\UsersTabController.cs" />
     <Compile Include="AdminForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -108,12 +121,16 @@
     <Compile Include="DriverClasses\DriverLocationManager.cs" />
     <Compile Include="DriverClasses\DriverMapManager.cs" />
     <Compile Include="DriverClasses\DriverUIManager.cs" />
+    <Compile Include="DriverClasses\MapVisualization.cs" />
     <Compile Include="DriverForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="DriverForm.Designer.cs">
       <DependentUpon>DriverForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="LoginClasses\FormInputCollection.cs" />
+    <Compile Include="LoginClasses\LoginControlFactory.cs" />
+    <Compile Include="LoginClasses\ValidationResult.cs" />
     <Compile Include="LoginForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -125,6 +142,10 @@
     <Compile Include="Models\Solution.cs" />
     <Compile Include="Models\StopDetail.cs" />
     <Compile Include="Models\Vehicle.cs" />
+    <Compile Include="PassengerClasses\MapVisualizer.cs" />
+    <Compile Include="PassengerClasses\PassengerController.cs" />
+    <Compile Include="PassengerClasses\PassengerDataAccessLayer.cs" />
+    <Compile Include="PassengerClasses\PassengerUIManager.cs" />
     <Compile Include="PassengerForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -133,6 +154,12 @@
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RegistrationForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="RegistrationForm.Designer.cs">
+      <DependentUpon>RegistrationForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Services\DatabaseService.cs" />
     <Compile Include="Services\MapService.cs" />
     <Compile Include="Services\RideSharingGenetic.cs" />
@@ -148,6 +175,8 @@
     <Compile Include="Utilities\GeoCalculator.cs" />
     <Compile Include="Utilities\PolylineEncoder.cs" />
     <Compile Include="Utilities\RouteScheduleHelper.cs" />
+    <Compile Include="Utilities\ThreadSafeMapManager.cs" />
+    <Compile Include="Utilities\ThreadUtils.cs" />
     <EmbeddedResource Include="AdminForm.resx">
       <DependentUpon>AdminForm.cs</DependentUpon>
     </EmbeddedResource>
@@ -170,6 +199,9 @@
       <DependentUpon>Resources.resx</DependentUpon>
       <DesignTime>True</DesignTime>
     </Compile>
+    <EmbeddedResource Include="RegistrationForm.resx">
+      <DependentUpon>RegistrationForm.cs</DependentUpon>
+    </EmbeddedResource>
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
@@ -184,7 +216,6 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
-  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>

@@ -1,6 +1,7 @@
 ﻿using GMap.NET.WindowsForms;
 using GMap.NET;
 using RideMatchProject.Services;
+using RideMatchProject.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,43 +16,45 @@ namespace RideMatchProject.DriverClasses
     /// </summary>
     public class DriverLocationManager
     {
-        private readonly MapService mapService;
-        private readonly DriverDataManager dataManager;
-        private GMapControl mapControl;
-        private Label instructionsLabel;
-        private bool isSettingLocation;
+        private readonly MapService _mapService;
+        private readonly DriverDataManager _dataManager;
+        private GMapControl _mapControl;
+        private Label _instructionsLabel;
+        private bool _isSettingLocation;
+        private ThreadSafeMapManager _threadSafeMapManager;
 
         public DriverLocationManager(MapService mapService, DriverDataManager dataManager)
         {
-            this.mapService = mapService;
-            this.dataManager = dataManager;
+            _mapService = mapService;
+            _dataManager = dataManager;
         }
 
         public void SetMapControl(GMapControl mapControl)
         {
-            this.mapControl = mapControl;
-            this.mapControl.MouseClick += MapControl_MouseClick;
+            _mapControl = mapControl;
+            _threadSafeMapManager = new ThreadSafeMapManager(_mapControl);
+            _mapControl.MouseClick += MapControl_MouseClick;
         }
 
         public void SetInstructionLabel(Label instructionsLabel)
         {
-            this.instructionsLabel = instructionsLabel;
+            _instructionsLabel = instructionsLabel;
         }
 
         public void EnableLocationSelection()
         {
             try
             {
-                isSettingLocation = true;
+                _isSettingLocation = true;
 
-                if (instructionsLabel != null)
+                if (_instructionsLabel != null)
                 {
-                    instructionsLabel.Visible = true;
+                    ShowInstructionsLabel(true);
                 }
 
-                if (mapControl != null)
+                if (_mapControl != null)
                 {
-                    mapControl.Cursor = Cursors.Hand;
+                    SetMapCursor(Cursors.Hand);
                 }
 
                 MessageBox.Show("Click on the map to set your starting location",
@@ -62,8 +65,27 @@ namespace RideMatchProject.DriverClasses
                 MessageBox.Show($"Error enabling location selection: {ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 
-                isSettingLocation = false;
+                _isSettingLocation = false;
             }
+        }
+
+        private void ShowInstructionsLabel(bool visible)
+        {
+            if (_instructionsLabel.InvokeRequired)
+            {
+                _instructionsLabel.Invoke(new Action(() => _instructionsLabel.Visible = visible));
+            }
+            else
+            {
+                _instructionsLabel.Visible = visible;
+            }
+        }
+
+        private void SetMapCursor(Cursor cursor)
+        {
+            _threadSafeMapManager.ExecuteOnUIThread(() => {
+                _mapControl.Cursor = cursor;
+            });
         }
 
         public async Task SearchAddressAsync(string address)
@@ -72,15 +94,13 @@ namespace RideMatchProject.DriverClasses
 
             try
             {
-                mapControl.Parent.Cursor = Cursors.WaitCursor;
+                SetParentCursor(Cursors.WaitCursor);
 
-                var result = await mapService.GeocodeAddressAsync(address);
+                var result = await _mapService.GeocodeAddressAsync(address);
 
                 if (result.HasValue)
                 {
-                    mapControl.Position = new PointLatLng(result.Value.Latitude, result.Value.Longitude);
-                    mapControl.Zoom = 15;
-
+                    _threadSafeMapManager.SetPosition(result.Value.Latitude, result.Value.Longitude, 15);
                     await UpdateLocationAsync(result.Value.Latitude, result.Value.Longitude);
                 }
                 else
@@ -96,36 +116,43 @@ namespace RideMatchProject.DriverClasses
             }
             finally
             {
-                mapControl.Parent.Cursor = Cursors.Default;
+                SetParentCursor(Cursors.Default);
+            }
+        }
+
+        private void SetParentCursor(Cursor cursor)
+        {
+            if (_mapControl.Parent != null)
+            {
+                if (_mapControl.Parent.InvokeRequired)
+                {
+                    _mapControl.Parent.Invoke(new Action(() => _mapControl.Parent.Cursor = cursor));
+                }
+                else
+                {
+                    _mapControl.Parent.Cursor = cursor;
+                }
             }
         }
 
         private void MapControl_MouseClick(object sender, MouseEventArgs e)
         {
-            if (!isSettingLocation) return;
+            if (!_isSettingLocation) return;
 
             try
             {
-                PointLatLng point = mapControl.FromLocalToLatLng(e.X, e.Y);
+                PointLatLng point = _mapControl.FromLocalToLatLng(e.X, e.Y);
 
                 Task.Run(async () => {
                     try
                     {
-                        string address = await mapService.ReverseGeocodeAsync(point.Lat, point.Lng);
+                        string address = await _mapService.ReverseGeocodeAsync(point.Lat, point.Lng);
 
-                        mapControl.Invoke(new Action(async () => {
-                            await UpdateLocationAsync(point.Lat, point.Lng, address);
-                            DisableLocationSelection();
-                        }));
+                        SafeProcessLocationUpdate(point.Lat, point.Lng, address);
                     }
                     catch (Exception ex)
                     {
-                        mapControl.Invoke(new Action(() => {
-                            MessageBox.Show($"Error getting address: {ex.Message}",
-                                "Geocoding Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
-                            DisableLocationSelection();
-                        }));
+                        ShowMapClickError(ex);
                     }
                 });
             }
@@ -138,18 +165,57 @@ namespace RideMatchProject.DriverClasses
             }
         }
 
+        private void SafeProcessLocationUpdate(double latitude, double longitude, string address)
+        {
+            if (_mapControl.InvokeRequired)
+            {
+                _mapControl.Invoke(new Action(async () => {
+                    await UpdateLocationAsync(latitude, longitude, address);
+                    DisableLocationSelection();
+                }));
+            }
+            else
+            {
+                // Already on UI thread
+                Task.Run(async () => {
+                    await UpdateLocationAsync(latitude, longitude, address);
+                    DisableLocationSelection();
+                });
+            }
+        }
+
+        private void ShowMapClickError(Exception ex)
+        {
+            if (_mapControl.InvokeRequired)
+            {
+                _mapControl.Invoke(new Action(() => {
+                    MessageBox.Show($"Error getting address: {ex.Message}",
+                        "Geocoding Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                    DisableLocationSelection();
+                }));
+            }
+            else
+            {
+                MessageBox.Show($"Error getting address: {ex.Message}",
+                    "Geocoding Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+                DisableLocationSelection();
+            }
+        }
+
         private void DisableLocationSelection()
         {
-            isSettingLocation = false;
+            _isSettingLocation = false;
 
-            if (instructionsLabel != null)
+            if (_instructionsLabel != null)
             {
-                instructionsLabel.Visible = false;
+                ShowInstructionsLabel(false);
             }
 
-            if (mapControl != null)
+            if (_mapControl != null)
             {
-                mapControl.Cursor = Cursors.Default;
+                SetMapCursor(Cursors.Default);
             }
         }
 
@@ -157,14 +223,14 @@ namespace RideMatchProject.DriverClasses
         {
             try
             {
-                mapControl.Parent.Cursor = Cursors.WaitCursor;
+                SetParentCursor(Cursors.WaitCursor);
 
                 if (string.IsNullOrEmpty(address))
                 {
-                    address = await mapService.ReverseGeocodeAsync(latitude, longitude);
+                    address = await _mapService.ReverseGeocodeAsync(latitude, longitude);
                 }
 
-                bool success = await dataManager.UpdateVehicleLocationAsync(latitude, longitude, address);
+                bool success = await _dataManager.UpdateVehicleLocationAsync(latitude, longitude, address);
 
                 if (success)
                 {
@@ -184,7 +250,7 @@ namespace RideMatchProject.DriverClasses
             }
             finally
             {
-                mapControl.Parent.Cursor = Cursors.Default;
+                SetParentCursor(Cursors.Default);
             }
         }
     }

@@ -1,178 +1,82 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using GMap.NET;
 using GMap.NET.WindowsForms;
 using RideMatchProject.Models;
 using RideMatchProject.Services;
-using RideMatchProject.UI;
+using RideMatchProject.Utilities;
 
 namespace RideMatchProject.DriverClasses
 {
     /// <summary>
-    /// Manages map-related operations for the driver interface
+    /// Manages map-related operations for the driver interface without the black center point
     /// </summary>
     public class DriverMapManager
     {
-        private readonly MapService mapService;
-        private readonly DatabaseService dbService;
-        private GMapControl mapControl;
+        private readonly MapService _mapService;
+        private readonly DatabaseService _dbService;
+        private GMapControl _mapControl;
+        private ThreadSafeMapManager _threadSafeMapManager;
+        private MapVisualization _mapVisualization;
 
         public DriverMapManager(MapService mapService, DatabaseService dbService)
         {
-            this.mapService = mapService ?? throw new ArgumentNullException(nameof(mapService));
-            this.dbService = dbService ?? throw new ArgumentNullException(nameof(dbService));
+            _mapService = mapService ?? throw new ArgumentNullException(nameof(mapService));
+            _dbService = dbService ?? throw new ArgumentNullException(nameof(dbService));
         }
 
         public void InitializeMap(GMapControl mapControl, double latitude, double longitude)
         {
-            this.mapControl = mapControl ?? throw new ArgumentNullException(nameof(mapControl));
-            mapService.InitializeGoogleMaps(this.mapControl, latitude, longitude);
+            _mapControl = mapControl ?? throw new ArgumentNullException(nameof(mapControl));
+
+            // Disable the default center marker (black dot) directly
+            _mapControl.ShowCenter = false;
+
+            _threadSafeMapManager = new ThreadSafeMapManager(_mapControl);
+            _mapVisualization = new MapVisualization(_mapService, _mapControl);
+
+            // Initialize map with custom settings
+            _mapService.InitializeGoogleMaps(_mapControl, latitude, longitude);
+
+            // Ensure map settings are properly configured for no center point
+            _threadSafeMapManager.DisableCenterMarker();
+
+            // Make sure required features are enabled
+            _threadSafeMapManager.ExecuteOnUIThread(() => {
+                _mapControl.MarkersEnabled = true;
+                _mapControl.PolygonsEnabled = true;
+                _mapControl.RoutesEnabled = true;
+            });
         }
 
         public async Task DisplayRouteOnMapAsync(Vehicle vehicle, List<Passenger> passengers)
         {
-            if (mapControl == null || vehicle == null)
+            if (_mapControl == null || vehicle == null)
             {
                 return;
             }
 
             try
             {
-                mapControl.Overlays.Clear();
+                // Make sure center marker is disabled
+                _threadSafeMapManager.DisableCenterMarker();
 
-                // Create all overlays
-                var vehiclesOverlay = new GMapOverlay("vehicles");
-                var passengersOverlay = new GMapOverlay("passengers");
-                var routesOverlay = new GMapOverlay("routes");
-                var destinationOverlay = new GMapOverlay("destination");
+                // Get destination tuple from database
+                var destinationTuple = await _dbService.GetDestinationAsync();
 
-                // Add markers for vehicle and passengers
-                AddVehicleToMap(vehicle, vehiclesOverlay);
-                AddPassengersToMap(passengers, passengersOverlay);
+                // Extract latitude and longitude from the tuple
+                double destLatitude = destinationTuple.Latitude;
+                double destLongitude = destinationTuple.Longitude;
 
-                // Add all overlays to map
-                mapControl.Overlays.Add(vehiclesOverlay);
-                mapControl.Overlays.Add(passengersOverlay);
-                mapControl.Overlays.Add(routesOverlay);
-                mapControl.Overlays.Add(destinationOverlay);
-
-                // Get destination and add route
-                var destination = await dbService.GetDestinationAsync();
-
-                // Add destination marker
-                var destMarker = MapOverlays.CreateDestinationMarker(
-                    destination.Latitude, destination.Longitude);
-                destinationOverlay.Markers.Add(destMarker);
-
-                // Create and add route
-                await CreateAndAddRouteAsync(vehicle, passengers, destination, routesOverlay);
-
-                // Force map refresh
-                mapControl.Zoom = mapControl.Zoom;
-                mapControl.Refresh();
+                // Use the enhanced visualization without black center point
+                await _mapVisualization.DisplayRouteWithPointsAsync(vehicle, passengers, destLatitude, destLongitude);
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Error displaying route: {ex.Message}",
                     "Map Display Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
-        private void AddVehicleToMap(Vehicle vehicle, GMapOverlay vehiclesOverlay)
-        {
-            if (vehicle.StartLatitude == 0 && vehicle.StartLongitude == 0)
-            {
-                return;
-            }
-
-            var vehicleMarker = MapOverlays.CreateVehicleMarker(vehicle);
-            vehiclesOverlay.Markers.Add(vehicleMarker);
-
-            mapControl.Position = new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude);
-            mapControl.Zoom = 12;
-        }
-
-        private void AddPassengersToMap(List<Passenger> passengers, GMapOverlay passengersOverlay)
-        {
-            if (passengers == null || passengers.Count == 0)
-            {
-                return;
-            }
-
-            foreach (var passenger in passengers)
-            {
-                if (passenger == null)
-                {
-                    continue;
-                }
-
-                var passengerMarker = MapOverlays.CreatePassengerMarker(passenger);
-                passengersOverlay.Markers.Add(passengerMarker);
-            }
-        }
-
-        private async Task CreateAndAddRouteAsync(
-            Vehicle vehicle,
-            List<Passenger> passengers,
-            dynamic destination,
-            GMapOverlay routesOverlay)
-        {
-            try
-            {
-                List<PointLatLng> routePoints = new List<PointLatLng>();
-
-                // Add vehicle starting point
-                routePoints.Add(new PointLatLng(vehicle.StartLatitude, vehicle.StartLongitude));
-
-                // Add passenger points
-                if (passengers != null)
-                {
-                    foreach (var passenger in passengers)
-                    {
-                        if (passenger != null)
-                        {
-                            routePoints.Add(new PointLatLng(passenger.Latitude, passenger.Longitude));
-                        }
-                    }
-                }
-
-                // Add destination point
-                routePoints.Add(new PointLatLng(destination.Latitude, destination.Longitude));
-
-                if (routePoints.Count < 2)
-                {
-                    return;
-                }
-
-                // Try to get detailed route from Google API
-                List<PointLatLng> finalRoutePoints;
-                try
-                {
-                    finalRoutePoints = await mapService.GetGoogleDirectionsAsync(routePoints);
-
-                    if (finalRoutePoints == null || finalRoutePoints.Count == 0)
-                    {
-                        finalRoutePoints = routePoints;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // If Google API fails, use direct route between points
-                    finalRoutePoints = routePoints;
-                    Console.WriteLine($"Using direct route. Google API error: {ex.Message}");
-                }
-
-                // Create and add route to overlay
-                var route = MapOverlays.CreateRoute(finalRoutePoints, "DriverRoute", Color.Blue, 4);
-                routesOverlay.Routes.Add(route);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error creating route: {ex.Message}",
-                    "Route Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
