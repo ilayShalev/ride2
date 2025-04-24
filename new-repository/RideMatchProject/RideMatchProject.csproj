@@ -143,6 +143,7 @@
     </Compile>
     <Compile Include="Utilities\GeoCalculator.cs" />
     <Compile Include="Utilities\PolylineEncoder.cs" />
+    <Compile Include="Utilities\RouteScheduleHelper.cs" />
     <EmbeddedResource Include="AdminForm.resx">
       <DependentUpon>AdminForm.cs</DependentUpon>
     </EmbeddedResource>

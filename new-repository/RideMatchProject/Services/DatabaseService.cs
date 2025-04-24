@@ -1438,7 +1438,7 @@ namespace RideMatchProject.Services
         }
 
         public async Task<(Vehicle AssignedVehicle, DateTime? PickupTime)> GetPassengerAssignmentAsync(
-            int userId, string date)
+           int userId, string date)
         {
             var passengerService = new PassengerService(_dbManager);
             var passenger = await passengerService.GetPassengerByUserIdAsync(userId);
@@ -1472,6 +1472,43 @@ namespace RideMatchProject.Services
             }
 
             return (vehicle, pickupDateTime);
+        }
+
+        public async Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)>
+            GetDriverRouteAsync(int userId, string date)
+        {
+            var vehicleService = new VehicleService(_dbManager);
+            var vehicle = await vehicleService.GetVehicleByUserIdAsync(userId);
+
+            if (vehicle == null)
+            {
+                return (null, null, null);
+            }
+
+            int routeId = await GetRouteIdForDateAsync(date);
+
+            if (routeId <= 0)
+            {
+                return (vehicle, new List<Passenger>(), null);
+            }
+
+            var routeDetail = await GetRouteDetailForVehicleAsync(routeId, vehicle.Id);
+
+            if (routeDetail.Item1 <= 0)
+            {
+                return (vehicle, new List<Passenger>(), null);
+            }
+
+            vehicle.TotalDistance = routeDetail.Item2;
+            vehicle.TotalTime = routeDetail.Item3;
+            vehicle.DepartureTime = routeDetail.Item4;
+
+            var passengers = await GetPassengersForRouteDetailAsync(routeDetail.Item1);
+            vehicle.AssignedPassengers = passengers;
+
+            DateTime? firstPickupTime = CalculateFirstPickupTime(passengers, vehicle.DepartureTime);
+
+            return (vehicle, passengers, firstPickupTime);
         }
 
         private async Task<(int VehicleId, string PickupTime)> FindPassengerAssignmentAsync(
@@ -1813,42 +1850,6 @@ namespace RideMatchProject.Services
             vehicle.AssignedPassengers = passengers;
         }
 
-        public async Task<(Vehicle Vehicle, List<Passenger> Passengers, DateTime? PickupTime)>
-            GetDriverRouteAsync(int userId, string date)
-        {
-            var vehicleService = new VehicleService(_dbManager);
-            var vehicle = await vehicleService.GetVehicleByUserIdAsync(userId);
-
-            if (vehicle == null)
-            {
-                return (null, null, null);
-            }
-
-            int routeId = await GetRouteIdForDateAsync(date);
-
-            if (routeId <= 0)
-            {
-                return (vehicle, new List<Passenger>(), null);
-            }
-
-            var routeDetail = await GetRouteDetailForVehicleAsync(routeId, vehicle.Id);
-
-            if (routeDetail.Item1 <= 0)
-            {
-                return (vehicle, new List<Passenger>(), null);
-            }
-
-            vehicle.TotalDistance = routeDetail.Item2;
-            vehicle.TotalTime = routeDetail.Item3;
-            vehicle.DepartureTime = routeDetail.Item4;
-
-            var passengers = await GetPassengersForRouteDetailAsync(routeDetail.Item1);
-            vehicle.AssignedPassengers = passengers;
-
-            DateTime? firstPickupTime = CalculateFirstPickupTime(passengers, vehicle.DepartureTime);
-
-            return (vehicle, passengers, firstPickupTime);
-        }
 
         private async Task<(int RouteDetailId, double TotalDistance, double TotalTime, string DepartureTime)>
             GetRouteDetailForVehicleAsync(int routeId, int vehicleId)

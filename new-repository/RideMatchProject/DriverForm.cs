@@ -9,6 +9,7 @@ using GMap.NET.WindowsForms.Markers;
 using RideMatchProject.Models;
 using RideMatchProject.Services;
 using RideMatchProject.UI;
+using RideMatchProject.Utilities;
 
 namespace RideMatchProject
 {
@@ -41,7 +42,7 @@ namespace RideMatchProject
             dataManager = new DriverDataManager(dbService, userId, username);
             mapManager = new DriverMapManager(mapService, dbService);
             locationManager = new DriverLocationManager(mapService, dataManager);
-            uiManager = new DriverUIManager(this, dataManager, mapManager, locationManager);
+            uiManager = new DriverUIManager(this, dataManager, mapManager, locationManager,username);
         }
 
         protected override void OnLoad(EventArgs e)
@@ -125,6 +126,9 @@ namespace RideMatchProject
             this.username = username;
         }
 
+
+        // In DriverDataManager class in DriverForm.cs
+
         public async Task LoadDriverDataAsync()
         {
             try
@@ -138,7 +142,9 @@ namespace RideMatchProject
                 }
 
                 var destination = await dbService.GetDestinationAsync();
-                string queryDate = CalculateQueryDate(destination.TargetTime);
+
+                // Use the common helper to determine which date to query
+                string queryDate = RouteScheduleHelper.GetRouteQueryDate(destination.TargetTime);
 
                 // The GetDriverRouteAsync returns a tuple (Vehicle, List<Passenger>, DateTime?)
                 var routeData = await dbService.GetDriverRouteAsync(userId, queryDate);
@@ -158,7 +164,6 @@ namespace RideMatchProject
                 throw;
             }
         }
-
         private void InitializeDefaultVehicle()
         {
             Vehicle = new Vehicle
@@ -170,21 +175,7 @@ namespace RideMatchProject
             };
         }
 
-        private string CalculateQueryDate(string targetTimeString)
-        {
-            TimeSpan timeToAdd = TimeSpan.Parse(targetTimeString);
-            DateTime now = DateTime.Now;
-            DateTime targetTime = new DateTime(now.Year, now.Month, now.Day,
-                                     timeToAdd.Hours, timeToAdd.Minutes, timeToAdd.Seconds);
-
-            if (targetTime < DateTime.Now)
-            {
-                return now.AddDays(1).ToString("yyyy-MM-dd");
-            }
-
-            return now.ToString("yyyy-MM-dd");
-        }
-
+       
         private void ProcessRouteData(dynamic routeData)
         {
             if (routeData.Vehicle != null)
@@ -287,6 +278,7 @@ namespace RideMatchProject
         private readonly DriverDataManager dataManager;
         private readonly DriverMapManager mapManager;
         private readonly DriverLocationManager locationManager;
+        private readonly string username;
 
         // UI Controls
         private Panel leftPanel;
@@ -303,12 +295,13 @@ namespace RideMatchProject
         public GMapControl MapControl { get; private set; }
 
         public DriverUIManager(Form parentForm, DriverDataManager dataManager,
-            DriverMapManager mapManager, DriverLocationManager locationManager)
+            DriverMapManager mapManager, DriverLocationManager locationManager, string username)
         {
             this.parentForm = parentForm;
             this.dataManager = dataManager;
             this.mapManager = mapManager;
             this.locationManager = locationManager;
+            this.username = username;
         }
 
         public void InitializeUI()
@@ -334,7 +327,7 @@ namespace RideMatchProject
         {
             var titleLabel = new Label
             {
-                Text = $"Welcome, {dataManager.Vehicle?.DriverName ?? "Driver"}",
+                Text = $"Welcome, {username}",
                 Location = new Point(20, 20),
                 Size = new Size(960, 30),
                 TextAlign = ContentAlignment.MiddleCenter,

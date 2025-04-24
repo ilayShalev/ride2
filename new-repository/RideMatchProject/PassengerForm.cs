@@ -9,6 +9,7 @@ using GMap.NET.WindowsForms.Markers;
 using RideMatchProject.Models;
 using RideMatchProject.Services;
 using RideMatchProject.UI;
+using RideMatchProject.Utilities;
 
 namespace RideMatchProject
 {
@@ -276,6 +277,8 @@ namespace RideMatchProject
             _username = username;
         }
 
+
+
         public async Task LoadPassengerDataAsync()
         {
             try
@@ -284,8 +287,13 @@ namespace RideMatchProject
 
                 if (CurrentPassenger != null)
                 {
+                    var destination = await _databaseService.GetDestinationAsync();
+
+                    // Use the common helper to determine which date to query
+                    string queryDate = RouteScheduleHelper.GetRouteQueryDate(destination.TargetTime);
+
                     var assignment = await _databaseService.GetPassengerAssignmentAsync(
-                        _userId, DateTime.Now.ToString("yyyy-MM-dd"));
+                        _userId, queryDate);
 
                     AssignedVehicle = assignment.AssignedVehicle;
                     PickupTime = assignment.PickupTime;
@@ -306,7 +314,6 @@ namespace RideMatchProject
                 throw new DataException("Failed to load passenger data", ex);
             }
         }
-
         public async Task<bool> UpdatePassengerAvailabilityAsync(bool isAvailable)
         {
             if (CurrentPassenger == null)
@@ -834,7 +841,7 @@ namespace RideMatchProject
                 _detailsTextBox.AppendText($"License Plate: {vehicle.LicensePlate}\n");
             }
 
-            AppendPickupTimeInfo(passenger, pickupTime);
+            AppendPickupTimeInfo(pickupTime);
 
             if (!string.IsNullOrEmpty(vehicle.StartAddress))
             {
@@ -842,20 +849,15 @@ namespace RideMatchProject
             }
         }
 
-        private void AppendPickupTimeInfo(Passenger passenger, DateTime? pickupTime)
+        private void AppendPickupTimeInfo(DateTime? pickupTime)
         {
-            if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
-            {
-                _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
-                _detailsTextBox.AppendText($"Pickup Time: {passenger.EstimatedPickupTime}\n");
-                _detailsTextBox.SelectionFont = _detailsTextBox.Font;
-            }
-            else if (pickupTime.HasValue)
+            if (pickupTime.HasValue)
             {
                 _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
                 _detailsTextBox.AppendText($"Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
                 _detailsTextBox.SelectionFont = _detailsTextBox.Font;
             }
+    
             else
             {
                 _detailsTextBox.AppendText("Pickup Time: Not yet scheduled\n");
