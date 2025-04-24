@@ -104,6 +104,10 @@
     <Compile Include="AdminForm.Designer.cs">
       <DependentUpon>AdminForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="DriverClasses\DriverDataManager.cs" />
+    <Compile Include="DriverClasses\DriverLocationManager.cs" />
+    <Compile Include="DriverClasses\DriverMapManager.cs" />
+    <Compile Include="DriverClasses\DriverUIManager.cs" />
     <Compile Include="DriverForm.cs">
       <SubType>Form</SubType>
     </Compile>
