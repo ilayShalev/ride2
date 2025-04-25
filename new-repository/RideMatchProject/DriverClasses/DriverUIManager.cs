@@ -525,7 +525,15 @@ namespace RideMatchProject.DriverClasses
                 if (!string.IsNullOrEmpty(_dataManager.Vehicle.DepartureTime))
                 {
                     _routeDetailsTextBox.SelectionFont = new Font(_routeDetailsTextBox.Font, FontStyle.Bold);
-                    _routeDetailsTextBox.AppendText($"\nDeparture Time: {_dataManager.Vehicle.DepartureTime}\n\n");
+                    _routeDetailsTextBox.AppendText($"\nDeparture Time: {_dataManager.Vehicle.DepartureTime}\n");
+                    _routeDetailsTextBox.SelectionFont = _routeDetailsTextBox.Font;
+                }
+
+                // Add total route time if available
+                if (_dataManager.Vehicle.TotalTime > 0)
+                {
+                    _routeDetailsTextBox.SelectionFont = new Font(_routeDetailsTextBox.Font, FontStyle.Bold);
+                    _routeDetailsTextBox.AppendText($"Total Route Time: {TimeFormatter.FormatMinutesWithUnits(_dataManager.Vehicle.TotalTime)}\n");
                     _routeDetailsTextBox.SelectionFont = _routeDetailsTextBox.Font;
                 }
             });

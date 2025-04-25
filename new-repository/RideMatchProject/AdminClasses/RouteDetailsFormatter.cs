@@ -1,5 +1,6 @@
 ﻿using RideMatchProject.Models;
 using RideMatchProject.Services;
+using RideMatchProject.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -10,7 +11,6 @@ using System.Windows.Forms;
 
 namespace RideMatchProject.AdminClasses
 {
-
     /// <summary>
     /// Class to handle route details formatting
     /// </summary>
@@ -24,7 +24,7 @@ namespace RideMatchProject.AdminClasses
             textBox.AppendText($"Driver: {vehicle.DriverName ?? $"Driver {vehicle.Id}"}\n");
             textBox.AppendText($"Vehicle Capacity: {vehicle.Capacity}\n");
             textBox.AppendText($"Total Distance: {vehicle.TotalDistance:F2} km\n");
-            textBox.AppendText($"Total Time: {vehicle.TotalTime:F2} minutes\n");
+            textBox.AppendText($"Total Time: {TimeFormatter.FormatMinutesWithUnits(vehicle.TotalTime)}\n");
 
             // Add departure time if available
             if (!string.IsNullOrEmpty(vehicle.DepartureTime))
@@ -106,7 +106,7 @@ namespace RideMatchProject.AdminClasses
             textBox.AppendText($"Start Location: {startLocation}\n");
             textBox.AppendText($"Driver: {vehicle?.DriverName ?? "Unknown"}\n");
             textBox.AppendText($"Total Distance: {detail.TotalDistance:F2} km\n");
-            textBox.AppendText($"Total Time: {detail.TotalTime:F2} min\n");
+            textBox.AppendText($"Total Time: {TimeFormatter.FormatMinutesWithUnits(detail.TotalTime)}\n");
 
             if (!string.IsNullOrEmpty(vehicle?.DepartureTime))
             {
@@ -139,8 +139,8 @@ namespace RideMatchProject.AdminClasses
 
                 // Display stats for this stop
                 textBox.AppendText($"   Distance: {stop.DistanceFromPrevious:F2} km\n");
-                textBox.AppendText($"   Time: {stop.TimeFromPrevious:F2} min\n");
-                textBox.AppendText($"   Cumulative: {stop.CumulativeDistance:F2} km, {stop.CumulativeTime:F2} min\n\n");
+                textBox.AppendText($"   Time: {TimeFormatter.FormatMinutesWithUnits(stop.TimeFromPrevious)}\n");
+                textBox.AppendText($"   Cumulative: {stop.CumulativeDistance:F2} km, {TimeFormatter.FormatMinutes(stop.CumulativeTime)} min\n\n");
                 stopNumber++;
             }
         }
@@ -206,6 +206,4 @@ namespace RideMatchProject.AdminClasses
             textBox.SelectionFont = textBox.Font;
         }
     }
-
-
 }

@@ -206,6 +206,7 @@
     <Compile Include="Utilities\RouteScheduleHelper.cs" />
     <Compile Include="Utilities\ThreadSafeMapManager.cs" />
     <Compile Include="Utilities\ThreadUtils.cs" />
+    <Compile Include="Utilities\TimeFormatter.cs" />
     <EmbeddedResource Include="AdminForm.resx">
       <DependentUpon>AdminForm.cs</DependentUpon>
     </EmbeddedResource>

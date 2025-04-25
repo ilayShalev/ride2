@@ -7,6 +7,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using RideMatchProject.Utilities;
+
 
 namespace RideMatchProject.PassengerClasses
 {
@@ -391,6 +393,12 @@ namespace RideMatchProject.PassengerClasses
             }
 
             AppendPickupTimeInfo(pickupTime);
+
+            // Add total trip time if available
+            if (vehicle.TotalTime > 0)
+            {
+                _detailsTextBox.AppendText($"Estimated Trip Time: {TimeFormatter.FormatMinutesWithUnits(vehicle.TotalTime)}\n");
+            }
 
             if (!string.IsNullOrEmpty(vehicle.StartAddress))
             {
