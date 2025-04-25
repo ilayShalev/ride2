@@ -80,6 +80,24 @@ namespace RideMatchProject.UI
                 _uiManager.SetSaveInProgress(false);
             }
         }
+
+        private void InitializeComponent()
+        {
+            this.SuspendLayout();
+            // 
+            // UserEditForm
+            // 
+            this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Name = "UserEditForm";
+            this.Load += new System.EventHandler(this.UserEditForm_Load);
+            this.ResumeLayout(false);
+
+        }
+
+        private void UserEditForm_Load(object sender, EventArgs e)
+        {
+
+        }
     }
 
     /// <summary>

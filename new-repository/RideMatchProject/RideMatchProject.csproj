@@ -160,10 +160,38 @@
     <Compile Include="RegistrationForm.Designer.cs">
       <DependentUpon>RegistrationForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="Services\AlgoritemClasses\CrossoverOperator.cs" />
+    <Compile Include="Services\AlgoritemClasses\GeneticAlgorithmConfig.cs" />
+    <Compile Include="Services\AlgoritemClasses\MutationOperator.cs" />
+    <Compile Include="Services\AlgoritemClasses\PopulationManager.cs" />
+    <Compile Include="Services\AlgoritemClasses\ProblemData.cs" />
+    <Compile Include="Services\AlgoritemClasses\RouteCalculator.cs" />
+    <Compile Include="Services\AlgoritemClasses\SelectionOperator.cs" />
+    <Compile Include="Services\AlgoritemClasses\SolutionEvaluator.cs" />
     <Compile Include="Services\DatabaseService.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\DatabaseManager.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\DatabaseSchemaCreator.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\DatabaseSchemaUpdater.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\DefaultDataInserter.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\DestinationService.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\PassengerService.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\RouteService.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\SecurityHelper.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\SettingsService.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\UserService.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\VehicleService.cs" />
     <Compile Include="Services\MapService.cs" />
+    <Compile Include="Services\MapServiceClasses\ApiKeyManager.cs" />
+    <Compile Include="Services\MapServiceClasses\DirectionsService.cs" />
+    <Compile Include="Services\MapServiceClasses\GeocodingService.cs" />
+    <Compile Include="Services\MapServiceClasses\MapInitializer.cs" />
+    <Compile Include="Services\MapServiceClasses\RouteVisualizer.cs" />
     <Compile Include="Services\RideSharingGenetic.cs" />
     <Compile Include="Services\RoutingService.cs" />
+    <Compile Include="Services\RoutingServiceClasses\DestinationInfo.cs" />
+    <Compile Include="Services\RoutingServiceClasses\MapDisplayManager.cs" />
+    <Compile Include="Services\RoutingServiceClasses\RoutingPathCalculator.cs" />
+    <Compile Include="Services\RoutingServiceClasses\SolutionValidator.cs" />
     <Compile Include="UI\AddressSearchControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -201,6 +229,9 @@
     </Compile>
     <EmbeddedResource Include="RegistrationForm.resx">
       <DependentUpon>RegistrationForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="UI\UserEditForm.resx">
+      <DependentUpon>UserEditForm.cs</DependentUpon>
     </EmbeddedResource>
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
