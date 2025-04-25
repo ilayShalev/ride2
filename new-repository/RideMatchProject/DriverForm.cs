@@ -15,7 +15,7 @@ using RideMatchProject.DriverClasses;
 namespace RideMatchProject
 {
     /// <summary>
-    /// Main form for driver interface
+    /// Main form for driver interface with proper thread handling
     /// </summary>
     public partial class DriverForm : Form
     {
@@ -23,12 +23,18 @@ namespace RideMatchProject
         private DriverUIManager _uiManager;
         private DriverMapManager _mapManager;
         private DriverLocationManager _locationManager;
+        private readonly int _userId;
+        private readonly string _username;
 
         public DriverForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
             ValidateArguments(dbService, mapService, username);
+
+            _userId = userId;
+            _username = username;
+
             InitializeComponent();
-            InitializeManagers(dbService, mapService, userId, username);
+            InitializeManagers(dbService, mapService);
         }
 
         private void ValidateArguments(DatabaseService dbService, MapService mapService, string username)
@@ -38,12 +44,12 @@ namespace RideMatchProject
             if (string.IsNullOrEmpty(username)) throw new ArgumentNullException(nameof(username));
         }
 
-        private void InitializeManagers(DatabaseService dbService, MapService mapService, int userId, string username)
+        private void InitializeManagers(DatabaseService dbService, MapService mapService)
         {
-            _dataManager = new DriverDataManager(dbService, userId, username);
+            _dataManager = new DriverDataManager(dbService, _userId, _username);
             _mapManager = new DriverMapManager(mapService, dbService);
             _locationManager = new DriverLocationManager(mapService, _dataManager);
-            _uiManager = new DriverUIManager(this, _dataManager, _mapManager, _locationManager, username);
+            _uiManager = new DriverUIManager(this, _dataManager, _mapManager, _locationManager, _username);
         }
 
         protected override void OnLoad(EventArgs e)
@@ -52,10 +58,13 @@ namespace RideMatchProject
 
             try
             {
+                // Initialize UI components on the UI thread
                 _uiManager.InitializeUI();
+
+                // Initialize map (this is done on the UI thread by the manager)
                 _mapManager.InitializeMap(_uiManager.MapControl, 32.0741, 34.7922);
 
-                // Use SafeTaskRun to properly handle errors in async operations
+                // Use our thread-safe task runner to load data
                 ThreadUtils.SafeTaskRun(
                     async () => await LoadDataAndRefreshUI(),
                     ex => HandleLoadingError(ex)
@@ -63,58 +72,40 @@ namespace RideMatchProject
             }
             catch (Exception ex)
             {
-                ShowErrorMessage("Error initializing driver form", ex.Message);
+                ThreadUtils.ShowErrorMessage(this,
+                    $"Error initializing driver form: {ex.Message}",
+                    "Initialization Error");
             }
         }
 
-        // This method is required by the designer
+        // Required by the designer
         private void DriverForm_Load(object sender, EventArgs e)
         {
-            // This is intentionally left empty as we use OnLoad instead
+            // Implementation is in OnLoad override
         }
 
         private void HandleLoadingError(Exception ex)
         {
             ThreadUtils.ShowErrorMessage(this,
                 $"Error loading driver data: {(ex.InnerException?.Message ?? ex.Message)}",
-                "Error");
+                "Loading Error");
         }
 
         private async Task LoadDataAndRefreshUI()
         {
             await _dataManager.LoadDriverDataAsync();
 
-            // Use ThreadUtils to ensure UI updates happen on the UI thread
-            ThreadUtils.ExecuteOnUIThread(this, () => {
-                _uiManager.RefreshUI();
-                _mapManager.DisplayRouteOnMap(_dataManager.Vehicle, _dataManager.AssignedPassengers);
-            });
+            // UI updates are handled on the UI thread within these methods
+            _uiManager.RefreshUI();
+            await _mapManager.DisplayRouteOnMapAsync(_dataManager.Vehicle, _dataManager.AssignedPassengers);
         }
 
-        private void ShowErrorMessage(string title, string message)
+        // Ensure cleanup on form close
+        protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            ThreadUtils.ShowErrorMessage(this, message, title);
+            base.OnFormClosed(e);
+
+            // Clean up any resources or event handlers if needed
         }
-    }
-
-    /// <summary>
-    /// Models for data transfer
-    /// </summary>
-    public class RouteData
-    {
-        public Vehicle Vehicle { get; set; }
-        public List<Passenger> Passengers { get; set; }
-        public DateTime? PickupTime { get; set; }
-    }
-
-    /// <summary>
-    /// Model for destination location
-    /// </summary>
-    public class Destination
-    {
-        public double Latitude { get; set; }
-        public double Longitude { get; set; }
-        public string Address { get; set; }
-        public string TargetTime { get; set; }
     }
 }

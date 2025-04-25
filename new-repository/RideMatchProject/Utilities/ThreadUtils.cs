@@ -1,14 +1,17 @@
 ﻿using System;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Diagnostics;
 
 namespace RideMatchProject.Utilities
 {
     /// <summary>
-    /// Utility class for thread management operations
+    /// Comprehensive utility class for thread management operations
     /// </summary>
     public static class ThreadUtils
     {
+        private static readonly object _syncLock = new object();
+
         /// <summary>
         /// Executes an action on the UI thread associated with the control
         /// </summary>
@@ -16,6 +19,7 @@ namespace RideMatchProject.Utilities
         {
             if (control == null || control.IsDisposed)
             {
+                Debug.WriteLine("Warning: Attempted to execute UI operation on null or disposed control");
                 return;
             }
 
@@ -27,12 +31,11 @@ namespace RideMatchProject.Utilities
                 }
                 catch (ObjectDisposedException)
                 {
-                    // Control may have been disposed if form is closing
+                    Debug.WriteLine("Warning: Control was disposed during invoke");
                 }
                 catch (InvalidOperationException ex)
                 {
-                    // Handle case where handle isn't created yet
-                    Console.WriteLine($"UI operation failed: {ex.Message}");
+                    Debug.WriteLine($"UI thread operation failed: {ex.Message}");
                 }
             }
             else
@@ -48,6 +51,7 @@ namespace RideMatchProject.Utilities
         {
             if (control == null || control.IsDisposed)
             {
+                Debug.WriteLine("Warning: Attempted to execute UI operation on null or disposed control");
                 return default;
             }
 
@@ -59,13 +63,12 @@ namespace RideMatchProject.Utilities
                 }
                 catch (ObjectDisposedException)
                 {
-                    // Control may have been disposed if form is closing
+                    Debug.WriteLine("Warning: Control was disposed during invoke");
                     return default;
                 }
                 catch (InvalidOperationException ex)
                 {
-                    // Handle case where handle isn't created yet
-                    Console.WriteLine($"UI operation failed: {ex.Message}");
+                    Debug.WriteLine($"UI thread operation failed: {ex.Message}");
                     return default;
                 }
             }
@@ -76,7 +79,54 @@ namespace RideMatchProject.Utilities
         }
 
         /// <summary>
-        /// Runs a task with proper error handling
+        /// Executes an async task on the UI thread
+        /// </summary>
+        public static async Task ExecuteOnUIThreadAsync(Control control, Func<Task> asyncAction)
+        {
+            if (control == null || control.IsDisposed)
+            {
+                Debug.WriteLine("Warning: Attempted to execute async UI operation on null or disposed control");
+                return;
+            }
+
+            if (control.InvokeRequired)
+            {
+                var taskCompletionSource = new TaskCompletionSource<bool>();
+
+                try
+                {
+                    control.Invoke(new Action(async () =>
+                    {
+                        try
+                        {
+                            await asyncAction();
+                            taskCompletionSource.SetResult(true);
+                        }
+                        catch (Exception ex)
+                        {
+                            taskCompletionSource.SetException(ex);
+                        }
+                    }));
+
+                    await taskCompletionSource.Task;
+                }
+                catch (ObjectDisposedException)
+                {
+                    Debug.WriteLine("Warning: Control was disposed during async invoke");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Debug.WriteLine($"Async UI thread operation failed: {ex.Message}");
+                }
+            }
+            else
+            {
+                await asyncAction();
+            }
+        }
+
+        /// <summary>
+        /// Safely runs a task with proper error handling
         /// </summary>
         public static async void SafeTaskRun(Func<Task> taskFunc, Action<Exception> errorHandler = null)
         {
@@ -86,8 +136,8 @@ namespace RideMatchProject.Utilities
             }
             catch (Exception ex)
             {
+                Debug.WriteLine($"Task error: {ex.Message}\n{ex.StackTrace}");
                 errorHandler?.Invoke(ex);
-                Console.WriteLine($"Task error: {ex.Message}\n{ex.StackTrace}");
             }
         }
 
@@ -112,11 +162,85 @@ namespace RideMatchProject.Utilities
         }
 
         /// <summary>
-        /// Updates a control property on the UI thread
+        /// Shows a confirmation dialog on the UI thread and returns the result
         /// </summary>
-        public static void UpdateControlProperty<T>(Control control, Action<T> propertyUpdater, T value)
+        public static DialogResult ShowConfirmationDialog(Control parentControl, string message, string title = "Confirm")
         {
-            ExecuteOnUIThread(control, () => propertyUpdater(value));
+            return ExecuteOnUIThread(parentControl, () =>
+                MessageBox.Show(parentControl, message, title, MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+            );
+        }
+
+        /// <summary>
+        /// Updates control text on the UI thread
+        /// </summary>
+        public static void UpdateControlText(Control control, string text)
+        {
+            ExecuteOnUIThread(control, () => {
+                control.Text = text;
+            });
+        }
+
+        /// <summary>
+        /// Updates control enabled state on the UI thread
+        /// </summary>
+        public static void UpdateControlEnabled(Control control, bool enabled)
+        {
+            ExecuteOnUIThread(control, () => {
+                control.Enabled = enabled;
+            });
+        }
+
+        /// <summary>
+        /// Updates control visibility on the UI thread
+        /// </summary>
+        public static void UpdateControlVisibility(Control control, bool visible)
+        {
+            ExecuteOnUIThread(control, () => {
+                control.Visible = visible;
+            });
+        }
+
+        /// <summary>
+        /// Properly awaits a task and handles exceptions
+        /// </summary>
+        public static async Task AwaitSafelyAsync(Task task, Control control = null, string errorMessage = "Operation failed")
+        {
+            try
+            {
+                await task;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Task error: {ex.Message}\n{ex.StackTrace}");
+
+                if (control != null)
+                {
+                    ShowErrorMessage(control, $"{errorMessage}: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Properly awaits a task with result and handles exceptions
+        /// </summary>
+        public static async Task<T> AwaitSafelyAsync<T>(Task<T> task, T defaultValue = default, Control control = null, string errorMessage = "Operation failed")
+        {
+            try
+            {
+                return await task;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Task error: {ex.Message}\n{ex.StackTrace}");
+
+                if (control != null)
+                {
+                    ShowErrorMessage(control, $"{errorMessage}: {ex.Message}");
+                }
+
+                return defaultValue;
+            }
         }
     }
 }

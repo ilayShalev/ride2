@@ -201,6 +201,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Utilities\GeoCalculator.cs" />
+    <Compile Include="Utilities\GMapThreadExtensions.cs" />
     <Compile Include="Utilities\PolylineEncoder.cs" />
     <Compile Include="Utilities\RouteScheduleHelper.cs" />
     <Compile Include="Utilities\ThreadSafeMapManager.cs" />

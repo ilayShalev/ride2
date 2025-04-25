@@ -29,6 +29,9 @@ namespace RideMatchProject.PassengerClasses
         private Label _instructionsLabel;
         private Panel _leftPanel;
 
+        // Tag to identify location section controls
+        private const string TAG_LOCATION_SECTION = "location_section";
+
         public event EventHandler<bool> AvailabilityChanged;
         public event EventHandler RefreshRequested;
         public event EventHandler SetLocationRequested;
@@ -48,9 +51,16 @@ namespace RideMatchProject.PassengerClasses
             CreateLeftPanel();
             CreateMapControl();
 
-            CreateAvailabilitySection();
+            // Changed order: Details first, then status
             CreateDetailsSection();
-            CreateLocationSection();
+            CreateAvailabilitySection();
+
+            // Only create location section if checkbox is checked
+            if (_availabilityCheckBox.Checked)
+            {
+                CreateLocationSection();
+            }
+
             CreateActionButtons();
         }
 
@@ -92,12 +102,44 @@ namespace RideMatchProject.PassengerClasses
             _parentForm.Controls.Add(_mapControl);
         }
 
+        private void CreateDetailsSection()
+        {
+            // Moving details section to the top
+            var detailsLabel = new Label
+            {
+                Text = "Your Ride Details:",
+                Location = new Point(20, 20),
+                Size = new Size(200, 20),
+                Font = new Font("Arial", 10, FontStyle.Bold)
+            };
+            _leftPanel.Controls.Add(detailsLabel);
+
+            _detailsTextBox = new RichTextBox
+            {
+                Location = new Point(20, 50),
+                Size = new Size(310, 200),
+                ReadOnly = true
+            };
+            _leftPanel.Controls.Add(_detailsTextBox);
+
+            // Add divider after details section
+            var divider = new Panel
+            {
+                Location = new Point(20, 260),
+                Size = new Size(310, 2),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.Gray
+            };
+            _leftPanel.Controls.Add(divider);
+        }
+
         private void CreateAvailabilitySection()
         {
+            // Moving status section below details
             var statusLabel = new Label
             {
                 Text = "Tomorrow's Status:",
-                Location = new Point(20, 20),
+                Location = new Point(20, 270),
                 Size = new Size(150, 20),
                 Font = new Font("Arial", 10, FontStyle.Bold)
             };
@@ -106,19 +148,17 @@ namespace RideMatchProject.PassengerClasses
             _availabilityCheckBox = new CheckBox
             {
                 Text = "I need a ride tomorrow",
-                Location = new Point(20, 50),
+                Location = new Point(20, 300),
                 Size = new Size(300, 30),
                 Checked = true
             };
 
-            _availabilityCheckBox.CheckedChanged += (s, e) =>
-                AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
-
+            _availabilityCheckBox.CheckedChanged += AvailabilityCheckBox_CheckedChanged;
             _leftPanel.Controls.Add(_availabilityCheckBox);
 
             var divider = new Panel
             {
-                Location = new Point(20, 90),
+                Location = new Point(20, 340),
                 Size = new Size(310, 2),
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = Color.Gray
@@ -126,116 +166,147 @@ namespace RideMatchProject.PassengerClasses
             _leftPanel.Controls.Add(divider);
         }
 
-        private void CreateDetailsSection()
+        private void AvailabilityCheckBox_CheckedChanged(object sender, EventArgs e)
         {
-            var detailsLabel = new Label
-            {
-                Text = "Your Ride Details:",
-                Location = new Point(20, 110),
-                Size = new Size(200, 20),
-                Font = new Font("Arial", 10, FontStyle.Bold)
-            };
-            _leftPanel.Controls.Add(detailsLabel);
+            // Update UI sections
+            InvokeOnUIThread(() => {
+                if (_availabilityCheckBox.Checked)
+                {
+                    if (!HasLocationSection())
+                    {
+                        CreateLocationSection();
+                    }
+                }
+                else
+                {
+                    RemoveLocationSection();
+                }
+            });
 
-            _detailsTextBox = new RichTextBox
-            {
-                Location = new Point(20, 140),
-                Size = new Size(310, 200),
-                ReadOnly = true
-            };
-            _leftPanel.Controls.Add(_detailsTextBox);
+            // Trigger the availability changed event
+            AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
         }
 
         private void CreateLocationSection()
         {
-            var divider = new Panel
-            {
-                Location = new Point(20, 350),
-                Size = new Size(310, 2),
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.Gray
-            };
-            _leftPanel.Controls.Add(divider);
+            // Check if section already exists
+            if (HasLocationSection())
+                return;
 
             var locationLabel = new Label
             {
                 Text = "Set Your Pickup Location:",
-                Location = new Point(20, 360),
+                Location = new Point(20, 350),
                 Size = new Size(200, 20),
-                Font = new Font("Arial", 10, FontStyle.Bold)
+                Font = new Font("Arial", 10, FontStyle.Bold),
+                Tag = TAG_LOCATION_SECTION
             };
             _leftPanel.Controls.Add(locationLabel);
 
-            // Create button without event handler first
             _setLocationButton = new Button
             {
                 Text = "Set Location on Map",
-                Location = new Point(20, 390),
-                Size = new Size(150, 30)
+                Location = new Point(20, 380),
+                Size = new Size(150, 30),
+                Tag = TAG_LOCATION_SECTION
             };
-            // Add event handler separately
             _setLocationButton.Click += (s, e) => SetLocationRequested?.Invoke(this, EventArgs.Empty);
             _leftPanel.Controls.Add(_setLocationButton);
 
             var searchLabel = new Label
             {
                 Text = "Or Search Address:",
-                Location = new Point(20, 430),
-                Size = new Size(150, 20)
+                Location = new Point(20, 420),
+                Size = new Size(150, 20),
+                Tag = TAG_LOCATION_SECTION
             };
             _leftPanel.Controls.Add(searchLabel);
 
             _addressTextBox = new TextBox
             {
-                Location = new Point(20, 455),
-                Size = new Size(220, 25)
+                Location = new Point(20, 445),
+                Size = new Size(220, 25),
+                Tag = TAG_LOCATION_SECTION
             };
+            _leftPanel.Controls.Add(_addressTextBox);
 
-            // Create button without event handler first
             _searchButton = new Button
             {
                 Text = "Search",
-                Location = new Point(250, 455),
-                Size = new Size(80, 25)
+                Location = new Point(250, 445),
+                Size = new Size(80, 25),
+                Tag = TAG_LOCATION_SECTION
             };
-            // Add event handler separately
             _searchButton.Click += (s, e) => AddressSearchRequested?.Invoke(this, _addressTextBox.Text);
-            _leftPanel.Controls.Add(_addressTextBox);
             _leftPanel.Controls.Add(_searchButton);
 
             _instructionsLabel = new Label
             {
                 Text = "Click on the map to set your pickup location",
-                Location = new Point(20, 490),
+                Location = new Point(20, 480),
                 Size = new Size(310, 20),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.Red,
-                Visible = false
+                Visible = false,
+                Tag = TAG_LOCATION_SECTION
             };
             _leftPanel.Controls.Add(_instructionsLabel);
         }
 
+        private bool HasLocationSection()
+        {
+            foreach (Control control in _leftPanel.Controls)
+            {
+                if (control.Tag != null && control.Tag.ToString() == TAG_LOCATION_SECTION)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void RemoveLocationSection()
+        {
+            var controlsToRemove = new List<Control>();
+
+            foreach (Control control in _leftPanel.Controls)
+            {
+                if (control.Tag != null && control.Tag.ToString() == TAG_LOCATION_SECTION)
+                {
+                    controlsToRemove.Add(control);
+                }
+            }
+
+            foreach (Control control in controlsToRemove)
+            {
+                _leftPanel.Controls.Remove(control);
+                control.Dispose();
+            }
+
+            // Reset control references
+            _setLocationButton = null;
+            _addressTextBox = null;
+            _searchButton = null;
+            _instructionsLabel = null;
+        }
+
         private void CreateActionButtons()
         {
-            // Create button without event handler first
             _refreshButton = new Button
             {
                 Text = "Refresh",
                 Location = new Point(20, 530),
                 Size = new Size(150, 30)
             };
-            // Add event handler separately
             _refreshButton.Click += (s, e) => RefreshRequested?.Invoke(this, EventArgs.Empty);
             _leftPanel.Controls.Add(_refreshButton);
 
-            // Create button without event handler first
             _logoutButton = new Button
             {
                 Text = "Logout",
                 Location = new Point(180, 530),
                 Size = new Size(150, 30)
             };
-            // Add event handler separately
             _logoutButton.Click += (s, e) => _parentForm.Close();
             _leftPanel.Controls.Add(_logoutButton);
         }
@@ -335,7 +406,6 @@ namespace RideMatchProject.PassengerClasses
                 _detailsTextBox.AppendText($"Pickup Time: {pickupTime.Value.ToString("HH:mm")}\n");
                 _detailsTextBox.SelectionFont = _detailsTextBox.Font;
             }
-
             else
             {
                 _detailsTextBox.AppendText("Pickup Time: Not yet scheduled\n");
@@ -386,28 +456,52 @@ namespace RideMatchProject.PassengerClasses
         public void UpdateAvailabilityControl(bool isAvailable)
         {
             InvokeOnUIThread(() => {
-                _availabilityCheckBox.CheckedChanged -= (s, e) =>
-                    AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
+                // Remove event handler temporarily to avoid triggering events during update
+                _availabilityCheckBox.CheckedChanged -= AvailabilityCheckBox_CheckedChanged;
 
                 _availabilityCheckBox.Checked = isAvailable;
 
-                _availabilityCheckBox.CheckedChanged += (s, e) =>
-                    AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
+                // Update location section based on new state
+                if (isAvailable)
+                {
+                    if (!HasLocationSection())
+                    {
+                        CreateLocationSection();
+                    }
+                }
+                else
+                {
+                    RemoveLocationSection();
+                }
+
+                // Reattach event handler
+                _availabilityCheckBox.CheckedChanged += AvailabilityCheckBox_CheckedChanged;
             });
         }
 
         public void ShowLocationSelectionInstructions(bool visible)
         {
             InvokeOnUIThread(() => {
-                _instructionsLabel.Visible = visible;
+                if (_instructionsLabel != null)
+                {
+                    _instructionsLabel.Visible = visible;
+                }
             });
         }
 
         public void SetSearchControlsEnabled(bool enabled)
         {
             InvokeOnUIThread(() => {
-                _addressTextBox.Enabled = enabled;
-                _searchButton.Enabled = enabled;
+                if (_addressTextBox != null)
+                {
+                    _addressTextBox.Enabled = enabled;
+                }
+
+                if (_searchButton != null)
+                {
+                    _searchButton.Enabled = enabled;
+                }
+
                 _parentForm.Cursor = enabled ? Cursors.Default : Cursors.WaitCursor;
             });
         }
