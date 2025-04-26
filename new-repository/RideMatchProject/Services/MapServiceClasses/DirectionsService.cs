@@ -40,6 +40,7 @@ namespace RideMatchProject.Services.MapServiceClasses
         {
             if (HasInsufficientWaypoints(waypoints))
             {
+                Console.WriteLine("ERROR: Insufficient waypoints for directions");
                 return null;
             }
 
@@ -49,18 +50,19 @@ namespace RideMatchProject.Services.MapServiceClasses
 
                 if (_routeCache.ContainsKey(cacheKey))
                 {
+                    Console.WriteLine($"Using cached directions for {waypoints.Count} waypoints");
                     return _routeCache[cacheKey];
                 }
-                Console.WriteLine($"Requesting directions with {waypoints.Count} waypoints");
 
                 string url = BuildDirectionsUrl(waypoints);
-                Console.WriteLine($"Google API URL: {url}");
+                Console.WriteLine($"Requesting Google Directions API: {url}");
 
                 string response = await _httpClient.GetStringAsync(url);
-                Console.WriteLine($"Google API response received: {response.Substring(0, Math.Min(100, response.Length))}...");
+                Console.WriteLine($"Received response from Google API: {response.Substring(0, Math.Min(100, response.Length))}...");
 
                 var points = ProcessDirectionsResponse(response);
-                Console.WriteLine($"Processed {points?.Count ?? 0} points from response");
+
+                Console.WriteLine($"Processed {points?.Count ?? 0} points from Google API response");
 
                 if (points != null)
                 {
@@ -72,7 +74,7 @@ namespace RideMatchProject.Services.MapServiceClasses
             catch (Exception ex)
             {
                 Console.WriteLine($"ERROR in GetDirectionsAsync: {ex.Message}");
-
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
                 HandleDirectionsError(ex);
                 return null;
             }

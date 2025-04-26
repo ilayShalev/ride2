@@ -119,18 +119,44 @@ namespace RideMatchProject.Services.RoutingServiceClasses
             if (routeDetail != null && points != null && points.Count > 0)
             {
                 routeDetail.RoutePath = points;
+                vehicle.RoutePath = points; 
+                Console.WriteLine($"Set {points.Count} route path points to vehicle {vehicle.Id}");
+            }
+            else
+            {
+                Console.WriteLine($"WARNING: No route path points generated for vehicle {vehicle.Id}");
             }
         }
 
         private async Task<List<PointLatLng>> CreateAndAddRoute(Vehicle vehicle, GMapOverlay routesOverlay,
             Color[] colors, int vehicleIndex)
         {
-            var points = CreateInitialRoutePoints(vehicle);
-            var routePoints = await _mapService.GetGoogleDirectionsAsync(points);
+            Console.WriteLine($"Creating route for vehicle {vehicle.Id} with {vehicle.AssignedPassengers?.Count ?? 0} passengers");
 
-            if (routePoints != null && routePoints.Count > 0)
+            var points = CreateInitialRoutePoints(vehicle);
+            Console.WriteLine($"Created {points.Count} initial route points");
+
+            List<PointLatLng> routePoints = null;
+
+            try
             {
-                points = routePoints;
+                Console.WriteLine($"Requesting Google Directions API for vehicle {vehicle.Id}");
+                routePoints = await _mapService.GetGoogleDirectionsAsync(points);
+
+                if (routePoints != null && routePoints.Count > 0)
+                {
+                    Console.WriteLine($"Received {routePoints.Count} points from Google API");
+                    points = routePoints;
+                }
+                else
+                {
+                    Console.WriteLine($"WARNING: Google API returned no route points for vehicle {vehicle.Id}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR getting Google directions: {ex.Message}");
+                // Fall back to direct route
             }
 
             var routeColor = colors[vehicleIndex % colors.Length];
@@ -139,6 +165,7 @@ namespace RideMatchProject.Services.RoutingServiceClasses
 
             return points; // Return the points so they can be stored
         }
+
         private List<PointLatLng> CreateInitialRoutePoints(Vehicle vehicle)
         {
             var points = new List<PointLatLng>

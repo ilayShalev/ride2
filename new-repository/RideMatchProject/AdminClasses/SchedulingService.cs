@@ -113,7 +113,7 @@ namespace RideMatchProject.AdminClasses
         }
 
         private async Task CalculateRoutesAsync(Solution solution,
-            (int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime) destination)
+           (int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime) destination)
         {
             // Create a routing service - now passing the target time
             var routingService = new RoutingService(
@@ -139,12 +139,19 @@ namespace RideMatchProject.AdminClasses
                         details.RoutePath != null && details.RoutePath.Count > 0)
                     {
                         vehicle.RoutePath = details.RoutePath;
+                        Console.WriteLine($"Transferred {details.RoutePath.Count} path points to vehicle {vehicle.Id}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"WARNING: No route details/path available to transfer for vehicle {vehicle.Id}");
                     }
                 }
             }
             catch (Exception ex)
             {
                 // Log error but continue with estimated routes
+                Console.WriteLine($"ERROR getting Google routes: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
                 MessageDisplayer.ShowWarning(
                     $"Google API request failed: {ex.Message}. Using estimated routes instead.",
                     "API Error"
@@ -154,6 +161,7 @@ namespace RideMatchProject.AdminClasses
             // Calculate pickup times based on target arrival
             await CalculatePickupTimesAsync(solution, destination.TargetTime, routingService);
         }
+
         private async Task CalculatePickupTimesAsync(
             Solution solution,
             string targetTimeString,
