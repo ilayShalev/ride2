@@ -2,6 +2,7 @@
 using RideMatchProject.Models;
 using RideMatchProject.Services;
 using RideMatchProject.UI;
+using RideMatchProject.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -33,12 +34,12 @@ namespace RideMatchProject.AdminClasses
             : base(dbService, mapService, dataManager)
         {
         }
-
         public override void InitializeTab(TabPage tabPage)
         {
             CreateDateSelectionControls(tabPage);
             CreateRoutesPanel(tabPage);
         }
+
 
         private void CreateDateSelectionControls(TabPage tabPage)
         {
@@ -67,19 +68,12 @@ namespace RideMatchProject.AdminClasses
                 LoadButtonClick
             );
 
-            // Google Routes button
-            _getGoogleRoutesButton = AdminUIFactory.CreateButton(
-                "Get Google Routes",
-                new Point(520, 10),
-                new Size(150, 30),
-                GetGoogleRoutesButtonClick
-            );
+
 
             // Add controls to tab
             tabPage.Controls.Add(dateLabel);
             tabPage.Controls.Add(_dateSelector);
             tabPage.Controls.Add(_loadButton);
-            tabPage.Controls.Add(_getGoogleRoutesButton);
         }
 
         private void CreateRoutesPanel(TabPage tabPage)
@@ -139,23 +133,150 @@ namespace RideMatchProject.AdminClasses
 
         private async void LoadButtonClick(object sender, EventArgs e)
         {
-            await LoadRoutesForDateAsync(_dateSelector.Value);
-        }
+            _loadButton.Enabled = false;
+            _loadButton.Text = "Loading...";
 
-        private async void GetGoogleRoutesButtonClick(object sender, EventArgs e)
-        {
-            await GetGoogleRoutesAsync();
-        }
+            try
+            {
+                await LoadRoutesForDateAsync(_dateSelector.Value);
 
+                // Automatically get Google routes after loading basic data
+                if (_currentSolution != null && _currentSolution.Vehicles.Count > 0)
+                {
+                    try
+                    {
+                        // Create a new routing service with the destination
+                        var destination = await DbService.GetDestinationAsync();
+                        var tempRoutingService = new RoutingService(
+                            MapService,
+                            destination.Latitude,
+                            destination.Longitude
+                        );
+
+                        // Get the Google routes
+                        await tempRoutingService.GetGoogleRoutesAsync(_mapControl, _currentSolution);
+
+                        // Update routing service reference
+                        _routingService = tempRoutingService;
+
+                        // Update display
+                        UpdateRouteDetailsDisplay();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageDisplayer.ShowWarning(
+                            $"Routes loaded, but Google routing data could not be retrieved: {ex.Message}",
+                            "Partial Route Data"
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageDisplayer.ShowError(
+                    $"Error loading routes: {ex.Message}",
+                    "Load Error"
+                );
+            }
+            finally
+            {
+                _loadButton.Enabled = true;
+                _loadButton.Text = "Load Routes";
+            }
+        }
         private void RoutesListView_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (_routesListView.SelectedItems.Count > 0)
             {
                 int vehicleId = int.Parse(_routesListView.SelectedItems[0].SubItems[0].Text);
-                DisplayRouteDetails(vehicleId);
+
+                // Check if we have Google route details for this vehicle
+                if (_routingService != null && _routingService.VehicleRouteDetails.ContainsKey(vehicleId))
+                {
+                    // Display detailed route from Google data
+                    var vehicle = _currentSolution.Vehicles.FirstOrDefault(v => v.Id == vehicleId);
+                    if (vehicle != null)
+                    {
+                        var routeDetail = _routingService.VehicleRouteDetails[vehicleId];
+                        DisplayDetailedRouteForVehicle(vehicle, routeDetail);
+                    }
+                }
+                else
+                {
+                    // Fall back to simplified display if Google details aren't available
+                    DisplayRouteDetails(vehicleId);
+                }
             }
         }
 
+        private void DisplayDetailedRouteForVehicle(Vehicle vehicle, RouteDetails routeDetail)
+        {
+            _routeDetailsTextBox.Clear();
+
+            // Header with vehicle info
+            _routeDetailsTextBox.SelectionFont = new Font(_routeDetailsTextBox.Font, FontStyle.Bold);
+            _routeDetailsTextBox.AppendText($"Route Details for Vehicle {vehicle.Id}\n\n");
+            _routeDetailsTextBox.SelectionFont = _routeDetailsTextBox.Font;
+
+            _routeDetailsTextBox.AppendText($"Driver: {vehicle.DriverName ?? $"Driver {vehicle.Id}"}\n");
+            _routeDetailsTextBox.AppendText($"Vehicle Capacity: {vehicle.Capacity}\n");
+            _routeDetailsTextBox.AppendText($"Total Distance: {routeDetail.TotalDistance:F2} km\n");
+            _routeDetailsTextBox.AppendText($"Total Time: {TimeFormatter.FormatMinutesWithUnits(routeDetail.TotalTime)}\n");
+
+            if (!string.IsNullOrEmpty(vehicle.DepartureTime))
+            {
+                _routeDetailsTextBox.SelectionFont = new Font(_routeDetailsTextBox.Font, FontStyle.Bold);
+                _routeDetailsTextBox.AppendText($"Departure Time: {vehicle.DepartureTime}\n");
+                _routeDetailsTextBox.SelectionFont = _routeDetailsTextBox.Font;
+            }
+
+            _routeDetailsTextBox.AppendText("\n");
+            _routeDetailsTextBox.SelectionFont = new Font(_routeDetailsTextBox.Font, FontStyle.Bold);
+            _routeDetailsTextBox.AppendText("Pickup Details:\n");
+            _routeDetailsTextBox.SelectionFont = _routeDetailsTextBox.Font;
+
+            // Display each stop with detailed routing information
+            foreach (var stop in routeDetail.StopDetails)
+            {
+                if (stop.PassengerId >= 0)
+                {
+                    var passenger = vehicle.AssignedPassengers.FirstOrDefault(p => p.Id == stop.PassengerId);
+                    if (passenger != null)
+                    {
+                        _routeDetailsTextBox.AppendText($"{stop.StopNumber}. {passenger.Name}\n");
+
+                        string location = !string.IsNullOrEmpty(passenger.Address)
+                            ? passenger.Address
+                            : $"({passenger.Latitude:F4}, {passenger.Longitude:F4})";
+
+                        _routeDetailsTextBox.AppendText($"   Pickup at: {location}\n");
+
+                        if (!string.IsNullOrEmpty(passenger.EstimatedPickupTime))
+                        {
+                            _routeDetailsTextBox.SelectionFont = new Font(_routeDetailsTextBox.Font, FontStyle.Bold);
+                            _routeDetailsTextBox.AppendText($"   Estimated pickup time: {passenger.EstimatedPickupTime}\n");
+                            _routeDetailsTextBox.SelectionFont = _routeDetailsTextBox.Font;
+                        }
+
+                        // Add Google-specific routing details
+                        _routeDetailsTextBox.AppendText($"   Distance from previous: {stop.DistanceFromPrevious:F2} km\n");
+                        _routeDetailsTextBox.AppendText($"   Time from previous: {TimeFormatter.FormatMinutesWithUnits(stop.TimeFromPrevious)}\n");
+                        _routeDetailsTextBox.AppendText($"   Cumulative distance: {stop.CumulativeDistance:F2} km\n");
+                        _routeDetailsTextBox.AppendText("\n");
+                    }
+                }
+                else if (stop.StopNumber > 0) // Destination
+                {
+                    _routeDetailsTextBox.SelectionFont = new Font(_routeDetailsTextBox.Font, FontStyle.Bold);
+                    _routeDetailsTextBox.AppendText($"{stop.StopNumber}. Destination\n");
+                    _routeDetailsTextBox.SelectionFont = _routeDetailsTextBox.Font;
+
+                    _routeDetailsTextBox.AppendText($"   Distance from previous: {stop.DistanceFromPrevious:F2} km\n");
+                    _routeDetailsTextBox.AppendText($"   Time from previous: {TimeFormatter.FormatMinutesWithUnits(stop.TimeFromPrevious)}\n");
+                    _routeDetailsTextBox.AppendText($"   Arrival time: {stop.CumulativeTime:F0} minutes after departure\n");
+                }
+            }
+        }
         private async Task LoadRoutesForDateAsync(DateTime date)
         {
             try
@@ -199,60 +320,6 @@ namespace RideMatchProject.AdminClasses
             }
         }
 
-        private async Task GetGoogleRoutesAsync()
-        {
-            try
-            {
-                if (_currentSolution == null)
-                {
-                    MessageDisplayer.ShowWarning(
-                        "Please load a route first!",
-                        "No Route Loaded"
-                    );
-                    return;
-                }
-
-                _getGoogleRoutesButton.Enabled = false;
-                _getGoogleRoutesButton.Text = "Getting Routes...";
-
-                try
-                {
-                    // Create a new routing service with the destination
-                    var destination = await DbService.GetDestinationAsync();
-                    var tempRoutingService = new RoutingService(
-                        MapService,
-                        destination.Latitude,
-                        destination.Longitude
-                    );
-
-                    // Get the Google routes
-                    await tempRoutingService.GetGoogleRoutesAsync(_mapControl, _currentSolution);
-
-                    // Update routing service reference
-                    _routingService = tempRoutingService;
-
-                    // Update display
-                    UpdateRouteDetailsDisplay();
-
-                    MessageDisplayer.ShowInfo(
-                        "Routes updated with Google API data!",
-                        "Routes Updated"
-                    );
-                }
-                catch (Exception ex)
-                {
-                    MessageDisplayer.ShowError(
-                        $"Error getting Google routes: {ex.Message}",
-                        "API Error"
-                    );
-                }
-            }
-            finally
-            {
-                _getGoogleRoutesButton.Enabled = true;
-                _getGoogleRoutesButton.Text = "Get Google Routes";
-            }
-        }
 
         private void DisplayPassengersOnMap(Solution solution)
         {

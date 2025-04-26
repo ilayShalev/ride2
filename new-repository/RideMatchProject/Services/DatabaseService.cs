@@ -240,7 +240,7 @@ namespace RideMatchProject.Services
         {
             return _routeService.GetDriverRouteAsync(userId, date);
         }
-
+ 
         public Task<(Vehicle AssignedVehicle, DateTime? PickupTime)> GetPassengerAssignmentAsync(int userId, string date)
         {
             return _routeService.GetPassengerAssignmentAsync(userId, date);
