@@ -28,10 +28,10 @@ namespace RideMatchProject.Services
 
         public Dictionary<int, RouteDetails> VehicleRouteDetails { get; private set; }
 
-        public RoutingService(MapService mapService, double destinationLat, double destinationLng)
+        public RoutingService(MapService mapService, double destinationLat, double destinationLng, string targetTime = "08:00:00")
         {
             _mapService = mapService;
-            _destination = new DestinationInfo(destinationLat, destinationLng);
+            _destination = new DestinationInfo(destinationLat, destinationLng, targetTime);
             _displayManager = new MapDisplayManager(_mapService);
             _routeCalculator = new RoutingPathCalculator(_mapService, _destination);
             _validator = new SolutionValidator();

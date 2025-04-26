@@ -111,11 +111,12 @@ namespace RideMatchProject
                 _destinationAddress = dest.Address;
                 _destinationTargetTime = dest.TargetTime;
 
-                // Initialize routing service with destination coordinates
+                // Initialize routing service with destination coordinates and target time
                 _routingService = new RoutingService(
                     _mapService,
                     _destinationLat,
-                    _destinationLng
+                    _destinationLng,
+                    _destinationTargetTime // Pass the target time
                 );
 
                 // Load initial data
@@ -131,7 +132,6 @@ namespace RideMatchProject
                 }
             }
         }
-
         private void TabSelectionChanged(object sender, EventArgs e)
         {
             var selectedTab = _tabControl.SelectedTab;

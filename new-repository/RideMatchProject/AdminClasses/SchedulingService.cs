@@ -113,13 +113,14 @@ namespace RideMatchProject.AdminClasses
         }
 
         private async Task CalculateRoutesAsync(Solution solution,
-          (int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime) destination)
+            (int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime) destination)
         {
-            // Create a routing service
+            // Create a routing service - now passing the target time
             var routingService = new RoutingService(
                 _mapService,
                 destination.Latitude,
-                destination.Longitude
+                destination.Longitude,
+                destination.TargetTime
             );
 
             // First calculate estimated routes
@@ -153,7 +154,6 @@ namespace RideMatchProject.AdminClasses
             // Calculate pickup times based on target arrival
             await CalculatePickupTimesAsync(solution, destination.TargetTime, routingService);
         }
-
         private async Task CalculatePickupTimesAsync(
             Solution solution,
             string targetTimeString,

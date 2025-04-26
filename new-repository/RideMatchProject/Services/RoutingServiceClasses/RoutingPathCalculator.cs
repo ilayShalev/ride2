@@ -26,7 +26,7 @@ namespace RideMatchProject.Services.RoutingServiceClasses
         }
 
         public async Task<Dictionary<int, RouteDetails>> GetGoogleRoutesAsync(
-            GMapControl mapControl, Solution solution)
+    GMapControl mapControl, Solution solution)
         {
             if (solution == null)
             {
@@ -43,6 +43,14 @@ namespace RideMatchProject.Services.RoutingServiceClasses
 
             var colors = mapControl != null ? MapOverlays.GetRouteColors() : null;
 
+            // Get arrival time - ensure we don't use DateTime.MinValue
+            DateTime arrivalTime = _destination.TargetArrivalTime;
+            if (arrivalTime == DateTime.MinValue)
+            {
+                // Default to today at 8:00 AM
+                arrivalTime = DateTime.Today.AddHours(8);
+            }
+
             for (int i = 0; i < solution.Vehicles.Count; i++)
             {
                 var vehicle = solution.Vehicles[i];
@@ -52,7 +60,7 @@ namespace RideMatchProject.Services.RoutingServiceClasses
                     continue;
                 }
 
-                await ProcessVehicleRoute(vehicle, routeDetails, routesOverlay, colors, i ,_destination.TargetArrivelTime);
+                await ProcessVehicleRoute(vehicle, routeDetails, routesOverlay, colors, i, arrivalTime);
             }
 
             if (mapControl != null)
@@ -81,10 +89,18 @@ namespace RideMatchProject.Services.RoutingServiceClasses
         }
 
         private async Task ProcessVehicleRoute(Vehicle vehicle, Dictionary<int, RouteDetails> routeDetails,
-            GMapOverlay routesOverlay, Color[] colors, int vehicleIndex, DateTime arrivalTime)
+         GMapOverlay routesOverlay, Color[] colors, int vehicleIndex, DateTime arrivalTime)
         {
+            // Check for valid arrival time and use a default if the arrival time is min value (uninitialized)
+            DateTime effectiveArrivalTime = arrivalTime;
+            if (arrivalTime == DateTime.MinValue)
+            {
+                // Default to today at 8:00 AM
+                effectiveArrivalTime = DateTime.Today.AddHours(8);
+            }
+
             var routeDetail = await _mapService.GetRouteDetailsAsync(
-                vehicle, _destination.Latitude, _destination.Longitude, arrivalTime);
+                vehicle, _destination.Latitude, _destination.Longitude, effectiveArrivalTime);
 
             if (routeDetail != null)
             {

@@ -310,7 +310,8 @@ namespace RideMatchProject.AdminClasses
                     _routingService = new RoutingService(
                         MapService,
                         destination.Latitude,
-                        destination.Longitude
+                        destination.Longitude,
+                        destination.TargetTime // Pass the target time
                     );
                 }
 
@@ -329,6 +330,7 @@ namespace RideMatchProject.AdminClasses
                 );
             }
         }
+
         private async Task<int> GetRouteIdForDateAsync(string date)
         {
             var parameters = new Dictionary<string, object> { { "@SolutionDate", date } };
