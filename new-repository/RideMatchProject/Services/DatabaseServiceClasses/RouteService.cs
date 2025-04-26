@@ -210,56 +210,110 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
 
         private async Task SaveVehicleRouteAsync(int routeId, Vehicle vehicle, SQLiteTransaction transaction)
         {
-            int routeDetailId = await InsertRouteDetailAsync(routeId, vehicle, transaction);
+            Console.WriteLine($"Starting to save route for vehicle {vehicle.Id} with {vehicle.AssignedPassengers?.Count ?? 0} passengers");
 
-            if (routeDetailId <= 0)
+            try
             {
-                // Don't return a value, just return
-                return;
-            }
+                // Step 1: Save route details
+                int routeDetailId = await InsertRouteDetailAsync(routeId, vehicle, transaction);
+                Console.WriteLine($"Saved route detail with ID {routeDetailId} for vehicle {vehicle.Id}");
 
-            await UpdateVehicleDepartureTimeAsync(vehicle.Id, vehicle.DepartureTime, transaction);
-
-            for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
-            {
-                var passenger = vehicle.AssignedPassengers[i];
-                await SavePassengerAssignmentAsync(routeDetailId, passenger, i + 1, transaction);
-                await UpdatePassengerPickupTimeAsync(passenger.Id, passenger.EstimatedPickupTime, transaction);
-            }
-
-            // Save route path if available
-            if (vehicle.RoutePath != null && vehicle.RoutePath.Count > 0)
-            {
-                await SaveRoutePathAsync(routeDetailId, vehicle.RoutePath, transaction);
-            }
-        }
-        private async Task SaveRoutePathAsync(int routeDetailId, List<PointLatLng> routePath, SQLiteTransaction transaction)
-        {
-            // Delete existing path points first
-            string deleteQuery = "DELETE FROM RoutePathPoints WHERE RouteDetailID = @RouteDetailID";
-            using (var cmd = new SQLiteCommand(deleteQuery, _connection, transaction))
-            {
-                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
-                await cmd.ExecuteNonQueryAsync();
-            }
-
-            // Insert new path points
-            string insertQuery = @"
-                   INSERT INTO RoutePathPoints (RouteDetailID, PointOrder, Latitude, Longitude)
-                  VALUES (@RouteDetailID, @PointOrder, @Latitude, @Longitude)";
-
-            for (int i = 0; i < routePath.Count; i++)
-            {
-                using (var cmd = new SQLiteCommand(insertQuery, _connection, transaction))
+                if (routeDetailId <= 0)
                 {
-                    cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
-                    cmd.Parameters.AddWithValue("@PointOrder", i);
-                    cmd.Parameters.AddWithValue("@Latitude", routePath[i].Lat);
-                    cmd.Parameters.AddWithValue("@Longitude", routePath[i].Lng);
-                    await cmd.ExecuteNonQueryAsync();
+                    Console.WriteLine($"ERROR: Failed to insert route details for vehicle {vehicle.Id}");
+                    return;
+                }
+
+                // Step 2: Update vehicle departure time
+                await UpdateVehicleDepartureTimeAsync(vehicle.Id, vehicle.DepartureTime, transaction);
+                Console.WriteLine($"Updated departure time to {vehicle.DepartureTime} for vehicle {vehicle.Id}");
+
+                // Step 3: Save passenger assignments
+                if (vehicle.AssignedPassengers != null)
+                {
+                    for (int i = 0; i < vehicle.AssignedPassengers.Count; i++)
+                    {
+                        var passenger = vehicle.AssignedPassengers[i];
+                        await SavePassengerAssignmentAsync(routeDetailId, passenger, i + 1, transaction);
+                        await UpdatePassengerPickupTimeAsync(passenger.Id, passenger.EstimatedPickupTime, transaction);
+                        Console.WriteLine($"Saved passenger {passenger.Id} assignment with pickup time {passenger.EstimatedPickupTime}");
+                    }
+                }
+
+                // Step 4: Save route path if available
+                if (vehicle.RoutePath != null && vehicle.RoutePath.Count > 0)
+                {
+                    Console.WriteLine($"Found {vehicle.RoutePath.Count} path points for vehicle {vehicle.Id} - saving to database");
+                    await SaveRoutePathAsync(routeDetailId, vehicle.RoutePath, transaction);
+                }
+                else
+                {
+                    Console.WriteLine($"WARNING: No route path available for vehicle {vehicle.Id}. Direct line will be used instead of road routes.");
+
+                    // Optionally create empty path to prevent future attempts to fetch it
+                    //await SaveRoutePathAsync(routeDetailId, new List<PointLatLng>(), transaction);
                 }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in SaveVehicleRouteAsync for vehicle {vehicle.Id}: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+
+                // Re-throw to allow transaction to be rolled back by calling method
+                throw;
+            }
         }
+
+        private async Task SaveRoutePathAsync(int routeDetailId, List<PointLatLng> routePath, SQLiteTransaction transaction)
+        {
+            try
+            {
+                // Delete existing path points first to avoid duplicates
+                string deleteQuery = "DELETE FROM RoutePathPoints WHERE RouteDetailID = @RouteDetailID";
+                using (var cmd = new SQLiteCommand(deleteQuery, _connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
+                    int deletedRows = await cmd.ExecuteNonQueryAsync();
+                    Console.WriteLine($"Deleted {deletedRows} existing path points for route detail {routeDetailId}");
+                }
+
+                // If we have no points or an empty list, just log and return
+                if (routePath == null || routePath.Count == 0)
+                {
+                    Console.WriteLine($"No path points to save for route detail {routeDetailId}");
+                    return;
+                }
+
+                // Insert new path points
+                string insertQuery = @"
+            INSERT INTO RoutePathPoints (RouteDetailID, PointOrder, Latitude, Longitude)
+            VALUES (@RouteDetailID, @PointOrder, @Latitude, @Longitude)";
+
+                int insertedCount = 0;
+                for (int i = 0; i < routePath.Count; i++)
+                {
+                    using (var cmd = new SQLiteCommand(insertQuery, _connection, transaction))
+                    {
+                        cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
+                        cmd.Parameters.AddWithValue("@PointOrder", i);
+                        cmd.Parameters.AddWithValue("@Latitude", routePath[i].Lat);
+                        cmd.Parameters.AddWithValue("@Longitude", routePath[i].Lng);
+
+                        await cmd.ExecuteNonQueryAsync();
+                        insertedCount++;
+                    }
+                }
+
+                Console.WriteLine($"Successfully inserted {insertedCount} path points for route detail {routeDetailId}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR saving route path for route detail {routeDetailId}: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                throw; // Re-throw to allow transaction to be rolled back
+            }
+        }
+
         private async Task<int> InsertRouteDetailAsync(int routeId, Vehicle vehicle, SQLiteTransaction transaction)
         {
             string query = @"

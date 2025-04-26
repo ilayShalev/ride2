@@ -51,11 +51,16 @@ namespace RideMatchProject.Services.MapServiceClasses
                 {
                     return _routeCache[cacheKey];
                 }
+                Console.WriteLine($"Requesting directions with {waypoints.Count} waypoints");
 
                 string url = BuildDirectionsUrl(waypoints);
+                Console.WriteLine($"Google API URL: {url}");
+
                 string response = await _httpClient.GetStringAsync(url);
+                Console.WriteLine($"Google API response received: {response.Substring(0, Math.Min(100, response.Length))}...");
 
                 var points = ProcessDirectionsResponse(response);
+                Console.WriteLine($"Processed {points?.Count ?? 0} points from response");
 
                 if (points != null)
                 {
@@ -66,6 +71,8 @@ namespace RideMatchProject.Services.MapServiceClasses
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"ERROR in GetDirectionsAsync: {ex.Message}");
+
                 HandleDirectionsError(ex);
                 return null;
             }

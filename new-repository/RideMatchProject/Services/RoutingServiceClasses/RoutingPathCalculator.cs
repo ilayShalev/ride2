@@ -1,12 +1,11 @@
-﻿using GMap.NET.WindowsForms;
-using GMap.NET;
+﻿using GMap.NET;
+using GMap.NET.WindowsForms;
 using RideMatchProject.Models;
 using RideMatchProject.UI;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace RideMatchProject.Services.RoutingServiceClasses

@@ -353,10 +353,12 @@ namespace RideMatchProject.AdminClasses
             {
                 try
                 {
+
                     int routeDetailId = await DbService.GetRouteDetailIdForVehicleAsync(vehicle.Id, routeId);
                     if (routeDetailId > 0)
                     {
                         var points = await DbService.GetRoutePathPointsAsync(routeDetailId);
+                        Console.WriteLine($"Retrieved {points?.Count ?? 0} path points for vehicle {vehicle.Id}, routeDetailId={routeDetailId}");
                         if (points != null && points.Count > 0)
                         {
                             vehicle.RoutePath = points;
