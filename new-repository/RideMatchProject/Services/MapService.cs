@@ -55,9 +55,9 @@ namespace RideMatchProject.Services
             return await _directionsService.GetDirectionsAsync(waypoints);
         }
 
-        public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng)
+        public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng, DateTime arrivalTime)
         {
-            return await _directionsService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng);
+            return await _directionsService.GetRouteDetailsAsync(vehicle, destinationLat, destinationLng, arrivalTime);
         }
 
         public RouteDetails EstimateRouteDetails(Vehicle vehicle, double destinationLat, double destinationLng)

@@ -1,14 +1,12 @@
-﻿using GMap.NET.WindowsForms;
-using GMap.NET;
-using RideMatchProject.Models;
-using RideMatchProject.UI;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using GMap.NET;
 using System.Windows.Forms;
+using GMap.NET.WindowsForms;
+using RideMatchProject.Models;
+using RideMatchProject.UI;
 
 namespace RideMatchProject.Services.RoutingServiceClasses
 {
@@ -24,6 +22,9 @@ namespace RideMatchProject.Services.RoutingServiceClasses
             _mapService = mapService;
         }
 
+        /// <summary>
+        /// Displays data points (passengers, vehicles, destination) on the map
+        /// </summary>
         public void DisplayDataOnMap(GMapControl mapControl, List<Passenger> passengers,
             List<Vehicle> vehicles, DestinationInfo destination)
         {
@@ -66,6 +67,9 @@ namespace RideMatchProject.Services.RoutingServiceClasses
 
         private void AddPassengerMarkers(GMapOverlay passengersOverlay, List<Passenger> passengers)
         {
+            if (passengers == null)
+                return;
+
             foreach (var passenger in passengers)
             {
                 var marker = MapOverlays.CreatePassengerMarker(passenger);
@@ -75,6 +79,9 @@ namespace RideMatchProject.Services.RoutingServiceClasses
 
         private void AddVehicleMarkers(GMapOverlay vehiclesOverlay, List<Vehicle> vehicles)
         {
+            if (vehicles == null)
+                return;
+
             foreach (var vehicle in vehicles)
             {
                 var marker = MapOverlays.CreateVehicleMarker(vehicle);
@@ -95,6 +102,7 @@ namespace RideMatchProject.Services.RoutingServiceClasses
             mapControl.Zoom = mapControl.Zoom; // Force refresh
         }
 
+        // Make sure to implement DisplaySolutionOnMap method as well
         public void DisplaySolutionOnMap(GMapControl mapControl, Solution solution,
             DestinationInfo destination)
         {
@@ -150,25 +158,36 @@ namespace RideMatchProject.Services.RoutingServiceClasses
                     continue;
                 }
 
-                List<PointLatLng> points;
-
                 // Use saved route path if available
                 if (vehicle.RoutePath != null && vehicle.RoutePath.Count > 1)
                 {
-                    points = vehicle.RoutePath;
+                    AddDetailedRoute(routesOverlay, vehicle.RoutePath, i, colors);
                 }
                 else
                 {
-                    // Otherwise create simple direct routes
-                    points = CreateRoutePoints(vehicle, destination);
+                    // Fall back to simple waypoint-to-waypoint route
+                    var simplePoints = CreateRoutePoints(vehicle, destination);
+                    AddSimpleRoute(routesOverlay, simplePoints, i, colors);
                 }
-
-                var routeColor = colors[i % colors.Length];
-                var route = MapOverlays.CreateRoute(points, $"Route {i}", routeColor);
-
-                routesOverlay.Routes.Add(route);
             }
         }
+
+        private void AddDetailedRoute(GMapOverlay routesOverlay, List<PointLatLng> routePath,
+            int vehicleIndex, Color[] colors)
+        {
+            var routeColor = colors[vehicleIndex % colors.Length];
+            var route = MapOverlays.CreateRoute(routePath, $"Route {vehicleIndex}", routeColor);
+            routesOverlay.Routes.Add(route);
+        }
+
+        private void AddSimpleRoute(GMapOverlay routesOverlay, List<PointLatLng> points,
+            int vehicleIndex, Color[] colors)
+        {
+            var routeColor = colors[vehicleIndex % colors.Length];
+            var route = MapOverlays.CreateRoute(points, $"Route {vehicleIndex} (simple)", routeColor);
+            routesOverlay.Routes.Add(route);
+        }
+
         private List<PointLatLng> CreateRoutePoints(Vehicle vehicle, DestinationInfo destination)
         {
             var points = new List<PointLatLng>

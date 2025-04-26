@@ -74,7 +74,7 @@ namespace RideMatchProject.AdminClasses
 
             // Google API setting
             _useGoogleApiCheckBox = AdminUIFactory.CreateCheckBox(
-                "Always Use Google Routes API",
+                "Have good Internet (use API)",
                 new Point(20, 140),
                 new Size(270, 20),
                 true

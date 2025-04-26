@@ -172,6 +172,7 @@
     <Compile Include="Services\DatabaseServiceClasses\DatabaseManager.cs" />
     <Compile Include="Services\DatabaseServiceClasses\DatabaseSchemaCreator.cs" />
     <Compile Include="Services\DatabaseServiceClasses\DatabaseSchemaUpdater.cs" />
+    <Compile Include="Services\DatabaseServiceClasses\DatabaseTableManager.cs" />
     <Compile Include="Services\DatabaseServiceClasses\DefaultDataInserter.cs" />
     <Compile Include="Services\DatabaseServiceClasses\DestinationService.cs" />
     <Compile Include="Services\DatabaseServiceClasses\PassengerService.cs" />

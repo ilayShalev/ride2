@@ -62,14 +62,5 @@ namespace RideMatchProject.Services
         {
             return _validator.ValidateSolution(solution, allPassengers);
         }
-
     }
-
-  
-
- 
-
- 
-
-  
 }

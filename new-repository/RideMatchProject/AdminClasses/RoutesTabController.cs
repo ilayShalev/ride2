@@ -1,4 +1,5 @@
-﻿using GMap.NET.WindowsForms;
+﻿using GMap.NET;
+using GMap.NET.WindowsForms;
 using RideMatchProject.Models;
 using RideMatchProject.Services;
 using RideMatchProject.UI;
@@ -10,6 +11,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using RideMatchProject.Services.DatabaseServiceClasses;
 
 namespace RideMatchProject.AdminClasses
 {
@@ -294,7 +296,14 @@ namespace RideMatchProject.AdminClasses
                     return;
                 }
 
-                // Initialize routing service if needed, but don't make API calls
+                // Load route paths for each vehicle
+                int routeId = await GetRouteIdForDateAsync(dateString);
+                if (routeId > 0)
+                {
+                    await LoadRoutePaths(_currentSolution, routeId);
+                }
+
+                // Initialize routing service if needed
                 if (_routingService == null)
                 {
                     var destination = await DbService.GetDestinationAsync();
@@ -305,7 +314,7 @@ namespace RideMatchProject.AdminClasses
                     );
                 }
 
-                // Display routes on map (using data from the database)
+                // Display routes on map using data from database
                 _routingService.DisplaySolutionOnMap(_mapControl, _currentSolution);
                 DisplayPassengersOnMap(_currentSolution);
 
@@ -320,7 +329,44 @@ namespace RideMatchProject.AdminClasses
                 );
             }
         }
+        private async Task<int> GetRouteIdForDateAsync(string date)
+        {
+            var parameters = new Dictionary<string, object> { { "@SolutionDate", date } };
 
+            string query = @"
+            SELECT RouteID 
+            FROM Routes 
+            WHERE SolutionDate = @SolutionDate 
+            ORDER BY GeneratedTime DESC 
+            LIMIT 1";
+
+            // Correct way to call this - use the appropriate service method instead
+            return await DbService.GetScalarValueAsync<int>(query, parameters);
+        }
+
+
+        private async Task LoadRoutePaths(Solution solution, int routeId)
+        {
+            foreach (var vehicle in solution.Vehicles)
+            {
+                try
+                {
+                    int routeDetailId = await DbService.GetRouteDetailIdForVehicleAsync(vehicle.Id, routeId);
+                    if (routeDetailId > 0)
+                    {
+                        var points = await DbService.GetRoutePathPointsAsync(routeDetailId);
+                        if (points != null && points.Count > 0)
+                        {
+                            vehicle.RoutePath = points;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error loading route path for vehicle {vehicle.Id}: {ex.Message}");
+                }
+            }
+        }
         private void DisplayPassengersOnMap(Solution solution)
         {
             var passengersOverlay = new GMapOverlay("passengers");

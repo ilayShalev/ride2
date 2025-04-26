@@ -24,6 +24,9 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
             EnsureRouteTablesExist();
             EnsureSettingsTablesExist();
             AddMissingColumns();
+
+            var tableManager = new DatabaseTableManager(_connection);
+            tableManager.CreateRoutePathPointsTable();
         }
 
         private void EnsureRouteTablesExist()

@@ -8,6 +8,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using GMap.NET;
 using RideMatchProject.Models;
 using RideMatchProject.Services.DatabaseServiceClasses;
 
@@ -37,6 +38,9 @@ namespace RideMatchProject.Services
             _destinationService = new DestinationService(_dbManager);
             _routeService = new RouteService(_dbManager);
             _settingsService = new SettingsService(_dbManager);
+
+            Task.Run(async () => await _routeService.MigrateRoutePathsAsync()).Wait();
+
         }
 
         public SQLiteConnection GetConnection()
@@ -260,6 +264,48 @@ namespace RideMatchProject.Services
             GetRouteHistoryAsync()
         {
             return _routeService.GetRouteHistoryAsync();
+        }
+
+        public async Task<List<PointLatLng>> GetRoutePathPointsAsync(int routeDetailId)
+        {
+            string query = @"
+        SELECT Latitude, Longitude
+        FROM RoutePathPoints
+        WHERE RouteDetailID = @RouteDetailID
+        ORDER BY PointOrder";
+
+            var parameters = new Dictionary<string, object> { { "@RouteDetailID", routeDetailId } };
+
+            return await _dbManager.ExecuteReaderAsync<PointLatLng>(
+                query,
+                async reader => new PointLatLng(
+                    reader.GetDouble(0),
+                    reader.GetDouble(1)
+                ),
+                parameters
+            );
+        }
+
+        public async Task<int> GetRouteDetailIdForVehicleAsync(int vehicleId, int routeId)
+        {
+            string query = @"
+                SELECT RouteDetailID
+                FROM RouteDetails
+                WHERE VehicleID = @VehicleID
+                AND RouteID = @RouteID";
+
+            var parameters = new Dictionary<string, object>
+        {
+            { "@VehicleID", vehicleId },
+            { "@RouteID", routeId }
+        };
+
+            return await _dbManager.ExecuteScalarAsync<int>(query, parameters);
+        }
+        public async Task<T> GetScalarValueAsync<T>(string query, Dictionary<string, object> parameters = null)
+        {
+            // Forward the call to the database manager
+            return await _dbManager.ExecuteScalarAsync<T>(query, parameters);
         }
 
         #endregion

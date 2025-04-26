@@ -143,7 +143,7 @@ namespace RideMatchProject.Services.MapServiceClasses
             );
         }
 
-        public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng)
+        public async Task<RouteDetails> GetRouteDetailsAsync(Vehicle vehicle, double destinationLat, double destinationLng, DateTime arrivalTime)
         {
             if (IsInvalidVehicleData(vehicle))
             {
@@ -152,7 +152,7 @@ namespace RideMatchProject.Services.MapServiceClasses
 
             try
             {
-                string url = BuildRouteDetailsUrl(vehicle, destinationLat, destinationLng);
+                string url = BuildRouteDetailsUrl(vehicle, destinationLat, destinationLng,arrivalTime);
                 string response = await _httpClient.GetStringAsync(url);
 
                 return ProcessRouteDetailsResponse(response, vehicle);
@@ -169,7 +169,7 @@ namespace RideMatchProject.Services.MapServiceClasses
             return vehicle == null || vehicle.AssignedPassengers == null || vehicle.AssignedPassengers.Count == 0;
         }
 
-        private string BuildRouteDetailsUrl(Vehicle vehicle, double destinationLat, double destinationLng)
+        private string BuildRouteDetailsUrl(Vehicle vehicle, double destinationLat, double destinationLng, DateTime arrivalTime)
         {
             string origin = $"{vehicle.StartLatitude},{vehicle.StartLongitude}";
             string destination = $"{destinationLat},{destinationLng}";
@@ -181,9 +181,13 @@ namespace RideMatchProject.Services.MapServiceClasses
                 ? $"&waypoints={waypointsStr}"
                 : "";
 
+
+            long arrivalTimestamp = new DateTimeOffset(arrivalTime).ToUnixTimeSeconds();
+
             return $"https://maps.googleapis.com/maps/api/directions/json?" +
                 $"origin={origin}" +
                 $"&destination={destination}" +
+                $"&arrival_time={arrivalTimestamp}" +
                 waypointsParam +
                 $"&key={_apiKey}";
         }

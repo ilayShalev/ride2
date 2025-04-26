@@ -112,9 +112,8 @@ namespace RideMatchProject.AdminClasses
             return solver.Solve(150); // Generations
         }
 
-        private async Task CalculateRoutesAsync(
-     Solution solution,
-     (int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime) destination)
+        private async Task CalculateRoutesAsync(Solution solution,
+          (int Id, string Name, double Latitude, double Longitude, string Address, string TargetTime) destination)
         {
             // Create a routing service
             var routingService = new RoutingService(
@@ -123,43 +122,38 @@ namespace RideMatchProject.AdminClasses
                 destination.Longitude
             );
 
-            // Calculate estimated routes
+            // First calculate estimated routes
             routingService.CalculateEstimatedRouteDetails(solution);
 
-            // Check if Google Routes API should be used
-            string useGoogleApi = await _dbService.GetSettingAsync("UseGoogleRoutesAPI", "1");
-            bool shouldUseGoogleApi = useGoogleApi == "1";
-
-            if (shouldUseGoogleApi)
+            // Always use Google API when running the scheduler
+            try
             {
-                try
-                {
-                    // Try to get routes from Google API
-                    await routingService.GetGoogleRoutesAsync(null, solution);
+                // Get routes from Google API
+                await routingService.GetGoogleRoutesAsync(null, solution);
 
-                    // After getting Google routes, transfer route paths to vehicles
-                    foreach (var vehicle in solution.Vehicles)
+                // After getting Google routes, transfer route paths to vehicles
+                foreach (var vehicle in solution.Vehicles)
+                {
+                    if (routingService.VehicleRouteDetails.TryGetValue(vehicle.Id, out RouteDetails details) &&
+                        details.RoutePath != null && details.RoutePath.Count > 0)
                     {
-                        if (routingService.VehicleRouteDetails.TryGetValue(vehicle.Id, out RouteDetails details) &&
-                            details.RoutePath != null && details.RoutePath.Count > 0)
-                        {
-                            vehicle.RoutePath = details.RoutePath;
-                        }
+                        vehicle.RoutePath = details.RoutePath;
                     }
                 }
-                catch (Exception ex)
-                {
-                    // If Google API fails, we already have the estimated routes calculated
-                    MessageDisplayer.ShowWarning(
-                        $"Google API request failed: {ex.Message}. Using estimated routes instead.",
-                        "API Error"
-                    );
-                }
+            }
+            catch (Exception ex)
+            {
+                // Log error but continue with estimated routes
+                MessageDisplayer.ShowWarning(
+                    $"Google API request failed: {ex.Message}. Using estimated routes instead.",
+                    "API Error"
+                );
             }
 
             // Calculate pickup times based on target arrival
             await CalculatePickupTimesAsync(solution, destination.TargetTime, routingService);
         }
+
         private async Task CalculatePickupTimesAsync(
             Solution solution,
             string targetTimeString,

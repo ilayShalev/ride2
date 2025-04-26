@@ -52,7 +52,7 @@ namespace RideMatchProject.Services.RoutingServiceClasses
                     continue;
                 }
 
-                await ProcessVehicleRoute(vehicle, routeDetails, routesOverlay, colors, i);
+                await ProcessVehicleRoute(vehicle, routeDetails, routesOverlay, colors, i ,_destination.TargetArrivelTime);
             }
 
             if (mapControl != null)
@@ -81,10 +81,10 @@ namespace RideMatchProject.Services.RoutingServiceClasses
         }
 
         private async Task ProcessVehicleRoute(Vehicle vehicle, Dictionary<int, RouteDetails> routeDetails,
-            GMapOverlay routesOverlay, Color[] colors, int vehicleIndex)
+            GMapOverlay routesOverlay, Color[] colors, int vehicleIndex, DateTime arrivalTime)
         {
             var routeDetail = await _mapService.GetRouteDetailsAsync(
-                vehicle, _destination.Latitude, _destination.Longitude);
+                vehicle, _destination.Latitude, _destination.Longitude, arrivalTime);
 
             if (routeDetail != null)
             {

@@ -208,13 +208,14 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
             }
         }
 
-        private async Task<int> SaveVehicleRouteAsync(int routeId, Vehicle vehicle, SQLiteTransaction transaction)
+        private async Task SaveVehicleRouteAsync(int routeId, Vehicle vehicle, SQLiteTransaction transaction)
         {
             int routeDetailId = await InsertRouteDetailAsync(routeId, vehicle, transaction);
 
             if (routeDetailId <= 0)
             {
-                return -1;
+                // Don't return a value, just return
+                return;
             }
 
             await UpdateVehicleDepartureTimeAsync(vehicle.Id, vehicle.DepartureTime, transaction);
@@ -231,11 +232,7 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
             {
                 await SaveRoutePathAsync(routeDetailId, vehicle.RoutePath, transaction);
             }
-
-            return routeDetailId;
         }
-
-        // New method to save route path
         private async Task SaveRoutePathAsync(int routeDetailId, List<PointLatLng> routePath, SQLiteTransaction transaction)
         {
             // Delete existing path points first
@@ -248,8 +245,8 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
 
             // Insert new path points
             string insertQuery = @"
-        INSERT INTO RoutePathPoints (RouteDetailID, PointOrder, Latitude, Longitude)
-        VALUES (@RouteDetailID, @PointOrder, @Latitude, @Longitude)";
+                   INSERT INTO RoutePathPoints (RouteDetailID, PointOrder, Latitude, Longitude)
+                  VALUES (@RouteDetailID, @PointOrder, @Latitude, @Longitude)";
 
             for (int i = 0; i < routePath.Count; i++)
             {
@@ -664,5 +661,41 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
             string passengersQuery = "UPDATE Passengers SET IsAvailableTomorrow = 1";
             await _dbManager.ExecuteNonQueryAsync(passengersQuery, null);
         }
+
+        /// <summary>
+        /// Migrates existing routes to include empty path points if needed
+        /// </summary>
+        public async Task MigrateRoutePathsAsync()
+        {
+            try
+            {
+                // Get all route details without path points
+                string query = @"
+            SELECT rd.RouteDetailID
+            FROM RouteDetails rd
+            LEFT JOIN (SELECT DISTINCT RouteDetailID FROM RoutePathPoints) rp 
+            ON rd.RouteDetailID = rp.RouteDetailID
+            WHERE rp.RouteDetailID IS NULL";
+
+                var routeDetailIds = await _dbManager.ExecuteReaderAsync<int>(
+                    query,
+                    async reader => reader.GetInt32(0),
+                    null
+                );
+
+                // Create empty path arrays for these routes
+                foreach (var routeDetailId in routeDetailIds)
+                {
+                    await SaveRoutePathAsync(routeDetailId, new List<PointLatLng>(), null);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Route migration error: {ex.Message}");
+            }
+        }
+
+
     }
+
 }
