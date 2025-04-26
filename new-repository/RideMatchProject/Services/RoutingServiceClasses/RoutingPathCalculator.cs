@@ -98,10 +98,16 @@ namespace RideMatchProject.Services.RoutingServiceClasses
                 return;
             }
 
-            await CreateAndAddRoute(vehicle, routesOverlay, colors, vehicleIndex);
+            var points = await CreateAndAddRoute(vehicle, routesOverlay, colors, vehicleIndex);
+
+            // Store the route path in the route details
+            if (routeDetail != null && points != null && points.Count > 0)
+            {
+                routeDetail.RoutePath = points;
+            }
         }
 
-        private async Task CreateAndAddRoute(Vehicle vehicle, GMapOverlay routesOverlay,
+        private async Task<List<PointLatLng>> CreateAndAddRoute(Vehicle vehicle, GMapOverlay routesOverlay,
             Color[] colors, int vehicleIndex)
         {
             var points = CreateInitialRoutePoints(vehicle);
@@ -115,8 +121,9 @@ namespace RideMatchProject.Services.RoutingServiceClasses
             var routeColor = colors[vehicleIndex % colors.Length];
             var route = MapOverlays.CreateRoute(points, $"Route {vehicleIndex}", routeColor);
             routesOverlay.Routes.Add(route);
-        }
 
+            return points; // Return the points so they can be stored
+        }
         private List<PointLatLng> CreateInitialRoutePoints(Vehicle vehicle)
         {
             var points = new List<PointLatLng>

@@ -1,4 +1,5 @@
-﻿using RideMatchProject.Models;
+﻿using GMap.NET;
+using RideMatchProject.Models;
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -225,9 +226,43 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
                 await UpdatePassengerPickupTimeAsync(passenger.Id, passenger.EstimatedPickupTime, transaction);
             }
 
+            // Save route path if available
+            if (vehicle.RoutePath != null && vehicle.RoutePath.Count > 0)
+            {
+                await SaveRoutePathAsync(routeDetailId, vehicle.RoutePath, transaction);
+            }
+
             return routeDetailId;
         }
 
+        // New method to save route path
+        private async Task SaveRoutePathAsync(int routeDetailId, List<PointLatLng> routePath, SQLiteTransaction transaction)
+        {
+            // Delete existing path points first
+            string deleteQuery = "DELETE FROM RoutePathPoints WHERE RouteDetailID = @RouteDetailID";
+            using (var cmd = new SQLiteCommand(deleteQuery, _connection, transaction))
+            {
+                cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // Insert new path points
+            string insertQuery = @"
+        INSERT INTO RoutePathPoints (RouteDetailID, PointOrder, Latitude, Longitude)
+        VALUES (@RouteDetailID, @PointOrder, @Latitude, @Longitude)";
+
+            for (int i = 0; i < routePath.Count; i++)
+            {
+                using (var cmd = new SQLiteCommand(insertQuery, _connection, transaction))
+                {
+                    cmd.Parameters.AddWithValue("@RouteDetailID", routeDetailId);
+                    cmd.Parameters.AddWithValue("@PointOrder", i);
+                    cmd.Parameters.AddWithValue("@Latitude", routePath[i].Lat);
+                    cmd.Parameters.AddWithValue("@Longitude", routePath[i].Lng);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
         private async Task<int> InsertRouteDetailAsync(int routeId, Vehicle vehicle, SQLiteTransaction transaction)
         {
             string query = @"
@@ -433,8 +468,29 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
             );
 
             vehicle.AssignedPassengers = passengers;
+            await LoadRoutePathAsync(routeDetailId, vehicle);
         }
+        private async Task LoadRoutePathAsync(int routeDetailId, Vehicle vehicle)
+        {
+            var parameters = new Dictionary<string, object> { { "@RouteDetailID", routeDetailId } };
 
+            string query = @"
+                SELECT Latitude, Longitude
+                FROM RoutePathPoints
+                WHERE RouteDetailID = @RouteDetailID
+                ORDER BY PointOrder";
+
+            var points = await _dbManager.ExecuteReaderAsync<PointLatLng>(
+                query,
+                async reader => new PointLatLng(
+                    reader.GetDouble(0),
+                    reader.GetDouble(1)
+                ),
+                parameters
+            );
+
+            vehicle.RoutePath = points;
+        }
 
         private async Task<(int RouteDetailId, double TotalDistance, double TotalTime, string DepartureTime)>
             GetRouteDetailForVehicleAsync(int routeId, int vehicleId)

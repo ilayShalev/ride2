@@ -150,14 +150,25 @@ namespace RideMatchProject.Services.RoutingServiceClasses
                     continue;
                 }
 
-                var points = CreateRoutePoints(vehicle, destination);
+                List<PointLatLng> points;
+
+                // Use saved route path if available
+                if (vehicle.RoutePath != null && vehicle.RoutePath.Count > 1)
+                {
+                    points = vehicle.RoutePath;
+                }
+                else
+                {
+                    // Otherwise create simple direct routes
+                    points = CreateRoutePoints(vehicle, destination);
+                }
+
                 var routeColor = colors[i % colors.Length];
                 var route = MapOverlays.CreateRoute(points, $"Route {i}", routeColor);
 
                 routesOverlay.Routes.Add(route);
             }
         }
-
         private List<PointLatLng> CreateRoutePoints(Vehicle vehicle, DestinationInfo destination)
         {
             var points = new List<PointLatLng>

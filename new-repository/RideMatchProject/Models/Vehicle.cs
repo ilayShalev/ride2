@@ -1,4 +1,5 @@
 ﻿// Update the Vehicle class to include DepartureTime property
+using GMap.NET;
 using System;
 using System.Collections.Generic;
 
@@ -41,6 +42,7 @@ namespace RideMatchProject.Models
         public string Color { get; set; } = "White";
         public string LicensePlate { get; set; } = "Not Set";
 
+        public List<PointLatLng> RoutePath { get; set; } = new List<PointLatLng>();
         public override string ToString()
         {
             string displayName = !string.IsNullOrEmpty(DriverName) ? DriverName : $"Vehicle {Id}";

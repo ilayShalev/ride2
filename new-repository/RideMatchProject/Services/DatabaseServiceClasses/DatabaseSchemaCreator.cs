@@ -134,6 +134,15 @@ namespace RideMatchProject.Services.DatabaseServiceClasses
                     FOREIGN KEY (RouteDetailID) REFERENCES RouteDetails(RouteDetailID),
                     FOREIGN KEY (PassengerID) REFERENCES Passengers(PassengerID)
                 )");
+            ExecuteNonQuery(@"
+                CREATE TABLE IF NOT EXISTS RoutePathPoints (
+                    PointID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    RouteDetailID INTEGER NOT NULL,
+                    PointOrder INTEGER NOT NULL,
+                    Latitude REAL NOT NULL,
+                    Longitude REAL NOT NULL,
+                    FOREIGN KEY (RouteDetailID) REFERENCES RouteDetails(RouteDetailID)
+                )");
         }
 
         private void CreateSettingsAndLogTables()

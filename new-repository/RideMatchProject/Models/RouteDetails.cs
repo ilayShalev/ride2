@@ -1,4 +1,5 @@
-﻿using System;
+﻿using GMap.NET;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,5 +13,7 @@ namespace RideMatchProject.Models
         public double TotalDistance { get; set; }
         public double TotalTime { get; set; }
         public List<StopDetail> StopDetails { get; set; } = new List<StopDetail>();
+        public List<PointLatLng> RoutePath { get; set; } = new List<PointLatLng>();
+
     }
 }

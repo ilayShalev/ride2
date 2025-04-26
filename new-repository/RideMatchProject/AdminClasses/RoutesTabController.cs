@@ -140,33 +140,34 @@ namespace RideMatchProject.AdminClasses
             {
                 await LoadRoutesForDateAsync(_dateSelector.Value);
 
-                // Automatically get Google routes after loading basic data
+                // Don't automatically get Google routes - just display what's in the database
                 if (_currentSolution != null && _currentSolution.Vehicles.Count > 0)
                 {
                     try
                     {
-                        // Create a new routing service with the destination
-                        var destination = await DbService.GetDestinationAsync();
-                        var tempRoutingService = new RoutingService(
-                            MapService,
-                            destination.Latitude,
-                            destination.Longitude
-                        );
+                        // Initialize routing service if needed, but don't call Google API
+                        if (_routingService == null)
+                        {
+                            var destination = await DbService.GetDestinationAsync();
+                            _routingService = new RoutingService(
+                                MapService,
+                                destination.Latitude,
+                                destination.Longitude
+                            );
+                        }
 
-                        // Get the Google routes
-                        await tempRoutingService.GetGoogleRoutesAsync(_mapControl, _currentSolution);
+                        // Display routes on map using data from database
+                        _routingService.DisplaySolutionOnMap(_mapControl, _currentSolution);
+                        DisplayPassengersOnMap(_currentSolution);
 
-                        // Update routing service reference
-                        _routingService = tempRoutingService;
-
-                        // Update display
-                        UpdateRouteDetailsDisplay();
+                        // Display routes in list
+                        DisplayRoutesInListView(_currentSolution);
                     }
                     catch (Exception ex)
                     {
                         MessageDisplayer.ShowWarning(
-                            $"Routes loaded, but Google routing data could not be retrieved: {ex.Message}",
-                            "Partial Route Data"
+                            $"Routes loaded, but display failed: {ex.Message}",
+                            "Display Error"
                         );
                     }
                 }
@@ -293,7 +294,7 @@ namespace RideMatchProject.AdminClasses
                     return;
                 }
 
-                // Initialize routing service if needed
+                // Initialize routing service if needed, but don't make API calls
                 if (_routingService == null)
                 {
                     var destination = await DbService.GetDestinationAsync();
@@ -304,7 +305,7 @@ namespace RideMatchProject.AdminClasses
                     );
                 }
 
-                // Display routes on map
+                // Display routes on map (using data from the database)
                 _routingService.DisplaySolutionOnMap(_mapControl, _currentSolution);
                 DisplayPassengersOnMap(_currentSolution);
 
@@ -319,7 +320,6 @@ namespace RideMatchProject.AdminClasses
                 );
             }
         }
-
 
         private void DisplayPassengersOnMap(Solution solution)
         {
