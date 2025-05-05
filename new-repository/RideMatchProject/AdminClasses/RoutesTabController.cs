@@ -280,6 +280,7 @@ namespace RideMatchProject.AdminClasses
                 }
             }
         }
+
         private async Task LoadRoutesForDateAsync(DateTime date)
         {
             try
@@ -311,15 +312,27 @@ namespace RideMatchProject.AdminClasses
                         MapService,
                         destination.Latitude,
                         destination.Longitude,
-                        destination.TargetTime // Pass the target time
+                        destination.TargetTime
                     );
                 }
 
                 // Display routes on map using data from database
                 _routingService.DisplaySolutionOnMap(_mapControl, _currentSolution);
-                DisplayPassengersOnMap(_currentSolution);
 
-                // Display routes in list
+                // Now automatically get Google Routes without requiring button press
+                try
+                {
+                    await _routingService.GetGoogleRoutesAsync(_mapControl, _currentSolution);
+                    // After getting Google routes, display updated solution
+                    _routingService.DisplaySolutionOnMap(_mapControl, _currentSolution);
+                }
+                catch (Exception ex)
+                {
+                    // Just log the error but continue - we still have the basic routes displayed
+                    Console.WriteLine($"Error fetching Google routes: {ex.Message}");
+                }
+
+                DisplayPassengersOnMap(_currentSolution);
                 DisplayRoutesInListView(_currentSolution);
             }
             catch (Exception ex)
@@ -330,7 +343,6 @@ namespace RideMatchProject.AdminClasses
                 );
             }
         }
-
         private async Task<int> GetRouteIdForDateAsync(string date)
         {
             var parameters = new Dictionary<string, object> { { "@SolutionDate", date } };

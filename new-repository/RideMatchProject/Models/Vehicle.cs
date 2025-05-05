@@ -1,5 +1,4 @@
-﻿// Update the Vehicle class to include DepartureTime property
-using GMap.NET;
+﻿using GMap.NET;
 using System;
 using System.Collections.Generic;
 
