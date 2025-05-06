@@ -9,55 +9,61 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using RideMatchProject.Utilities;
 
-
 namespace RideMatchProject.PassengerClasses
 {
     /// <summary>
-    /// Manages the user interface components
+    /// Manages the user interface components for the passenger dashboard in the RideMatch application.
+    /// Provides functionality for displaying passenger details, map controls, and location settings.
     /// </summary>
     public class PassengerUIManager
     {
-        private readonly Form _parentForm;
-        private readonly string _username;
+        private readonly Form _parentForm; // The main form hosting the UI components
+        private readonly string _username; // Username of the logged-in passenger
 
-        private GMapControl _mapControl;
-        private CheckBox _availabilityCheckBox;
-        private RichTextBox _detailsTextBox;
-        private Button _refreshButton;
-        private Button _logoutButton;
-        private Button _setLocationButton;
-        private TextBox _addressTextBox;
-        private Button _searchButton;
-        private Label _instructionsLabel;
-        private Panel _leftPanel;
+        private GMapControl _mapControl; // Map control for displaying and interacting with maps
+        private CheckBox _availabilityCheckBox; // Checkbox for toggling ride availability
+        private RichTextBox _detailsTextBox; // Text box for displaying passenger and ride details
+        private Button _refreshButton; // Button to refresh ride information
+        private Button _logoutButton; // Button to log out and close the form
+        private Button _setLocationButton; // Button to set pickup location on map
+        private TextBox _addressTextBox; // Text box for entering address to search
+        private Button _searchButton; // Button to initiate address search
+        private Label _instructionsLabel; // Label for location selection instructions
+        private Panel _leftPanel; // Panel containing UI controls on the left side
 
         // Tag to identify location section controls
         private const string TAG_LOCATION_SECTION = "location_section";
 
-        public event EventHandler<bool> AvailabilityChanged;
-        public event EventHandler RefreshRequested;
-        public event EventHandler SetLocationRequested;
-        public event EventHandler<string> AddressSearchRequested;
+        // Events for handling UI interactions
+        public event EventHandler<bool> AvailabilityChanged; // Triggered when availability changes
+        public event EventHandler RefreshRequested; // Triggered when refresh is requested
+        public event EventHandler SetLocationRequested; // Triggered when setting location on map
+        public event EventHandler<string> AddressSearchRequested; // Triggered when searching address
 
+        /// <summary>
+        /// Initializes a new instance of the PassengerUIManager class.
+        /// </summary>
+        /// <param name="parentForm">The parent form that hosts the UI components.</param>
+        /// <param name="username">The username of the logged-in passenger.</param>
         public PassengerUIManager(Form parentForm, string username)
         {
-            _parentForm = parentForm;
-            _username = username;
+            _parentForm = parentForm ?? throw new ArgumentNullException(nameof(parentForm));
+            _username = username ?? throw new ArgumentNullException(nameof(username));
 
             InitializeUI();
         }
 
+        /// <summary>
+        /// Sets up the entire user interface by creating and arranging all UI components.
+        /// </summary>
         public void InitializeUI()
         {
             CreateTitleLabel();
             CreateLeftPanel();
             CreateMapControl();
-
-            // Changed order: Details first, then status
             CreateDetailsSection();
             CreateAvailabilitySection();
 
-            // Only create location section if checkbox is checked
             if (_availabilityCheckBox.Checked)
             {
                 CreateLocationSection();
@@ -66,6 +72,9 @@ namespace RideMatchProject.PassengerClasses
             CreateActionButtons();
         }
 
+        /// <summary>
+        /// Creates a welcome label displaying the username at the top of the form.
+        /// </summary>
         private void CreateTitleLabel()
         {
             var titleLabel = new Label
@@ -79,6 +88,9 @@ namespace RideMatchProject.PassengerClasses
             _parentForm.Controls.Add(titleLabel);
         }
 
+        /// <summary>
+        /// Creates a panel on the left side to hold UI controls like details and buttons.
+        /// </summary>
         private void CreateLeftPanel()
         {
             _leftPanel = new Panel
@@ -90,6 +102,9 @@ namespace RideMatchProject.PassengerClasses
             _parentForm.Controls.Add(_leftPanel);
         }
 
+        /// <summary>
+        /// Creates and configures the map control for displaying geographical data.
+        /// </summary>
         private void CreateMapControl()
         {
             _mapControl = new GMapControl
@@ -104,9 +119,11 @@ namespace RideMatchProject.PassengerClasses
             _parentForm.Controls.Add(_mapControl);
         }
 
+        /// <summary>
+        /// Creates the section for displaying passenger and ride details.
+        /// </summary>
         private void CreateDetailsSection()
         {
-            // Moving details section to the top
             var detailsLabel = new Label
             {
                 Text = "Your Ride Details:",
@@ -124,7 +141,6 @@ namespace RideMatchProject.PassengerClasses
             };
             _leftPanel.Controls.Add(_detailsTextBox);
 
-            // Add divider after details section
             var divider = new Panel
             {
                 Location = new Point(20, 260),
@@ -135,9 +151,11 @@ namespace RideMatchProject.PassengerClasses
             _leftPanel.Controls.Add(divider);
         }
 
+        /// <summary>
+        /// Creates the section for toggling ride availability for the next day.
+        /// </summary>
         private void CreateAvailabilitySection()
         {
-            // Moving status section below details
             var statusLabel = new Label
             {
                 Text = "Tomorrow's Status:",
@@ -168,9 +186,13 @@ namespace RideMatchProject.PassengerClasses
             _leftPanel.Controls.Add(divider);
         }
 
+        /// <summary>
+        /// Handles changes to the availability checkbox, updating UI and triggering events.
+        /// </summary>
+        /// <param name="sender">The source of the event.</param>
+        /// <param name="e">Event data.</param>
         private void AvailabilityCheckBox_CheckedChanged(object sender, EventArgs e)
         {
-            // Update UI sections
             InvokeOnUIThread(() => {
                 if (_availabilityCheckBox.Checked)
                 {
@@ -185,13 +207,14 @@ namespace RideMatchProject.PassengerClasses
                 }
             });
 
-            // Trigger the availability changed event
             AvailabilityChanged?.Invoke(this, _availabilityCheckBox.Checked);
         }
 
+        /// <summary>
+        /// Creates the section for setting the passenger's pickup location.
+        /// </summary>
         private void CreateLocationSection()
         {
-            // Check if section already exists
             if (HasLocationSection())
                 return;
 
@@ -255,6 +278,10 @@ namespace RideMatchProject.PassengerClasses
             _leftPanel.Controls.Add(_instructionsLabel);
         }
 
+        /// <summary>
+        /// Checks if the location section already exists in the UI.
+        /// </summary>
+        /// <returns>True if the location section exists, false otherwise.</returns>
         private bool HasLocationSection()
         {
             foreach (Control control in _leftPanel.Controls)
@@ -267,6 +294,9 @@ namespace RideMatchProject.PassengerClasses
             return false;
         }
 
+        /// <summary>
+        /// Removes the location section controls from the UI.
+        /// </summary>
         private void RemoveLocationSection()
         {
             var controlsToRemove = new List<Control>();
@@ -285,13 +315,15 @@ namespace RideMatchProject.PassengerClasses
                 control.Dispose();
             }
 
-            // Reset control references
             _setLocationButton = null;
             _addressTextBox = null;
             _searchButton = null;
             _instructionsLabel = null;
         }
 
+        /// <summary>
+        /// Creates action buttons for refreshing data and logging out.
+        /// </summary>
         private void CreateActionButtons()
         {
             _refreshButton = new Button
@@ -313,6 +345,10 @@ namespace RideMatchProject.PassengerClasses
             _leftPanel.Controls.Add(_logoutButton);
         }
 
+        /// <summary>
+        /// Displays a loading message in the details text box and disables the refresh button.
+        /// </summary>
+        /// <param name="message">The message to display.</param>
         public void ShowLoadingMessage(string message)
         {
             InvokeOnUIThread(() => {
@@ -322,6 +358,12 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Displays passenger and ride details in the details text box.
+        /// </summary>
+        /// <param name="passenger">The passenger object containing user details.</param>
+        /// <param name="vehicle">The vehicle object containing ride details, if available.</param>
+        /// <param name="pickupTime">The scheduled pickup time, if available.</param>
         public void DisplayPassengerDetails(Passenger passenger, Vehicle vehicle, DateTime? pickupTime)
         {
             InvokeOnUIThread(() => {
@@ -347,6 +389,10 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Appends passenger information to the details text box.
+        /// </summary>
+        /// <param name="passenger">The passenger object containing user details.</param>
         private void AppendPassengerInfo(Passenger passenger)
         {
             _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
@@ -365,6 +411,12 @@ namespace RideMatchProject.PassengerClasses
             }
         }
 
+        /// <summary>
+        /// Appends vehicle and ride information to the details text box.
+        /// </summary>
+        /// <param name="vehicle">The vehicle object containing ride details.</param>
+        /// <param name="passenger">The passenger object for context.</param>
+        /// <param name="pickupTime">The scheduled pickup time, if available.</param>
         private void AppendVehicleInfo(Vehicle vehicle, Passenger passenger, DateTime? pickupTime)
         {
             _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
@@ -394,7 +446,6 @@ namespace RideMatchProject.PassengerClasses
 
             AppendPickupTimeInfo(pickupTime);
 
-            // Add total trip time if available
             if (vehicle.TotalTime > 0)
             {
                 _detailsTextBox.AppendText($"Estimated Trip Time: {TimeFormatter.FormatMinutesWithUnits(vehicle.TotalTime)}\n");
@@ -406,6 +457,10 @@ namespace RideMatchProject.PassengerClasses
             }
         }
 
+        /// <summary>
+        /// Appends pickup time information to the details text box.
+        /// </summary>
+        /// <param name="pickupTime">The scheduled pickup time, if available.</param>
         private void AppendPickupTimeInfo(DateTime? pickupTime)
         {
             if (pickupTime.HasValue)
@@ -420,6 +475,9 @@ namespace RideMatchProject.PassengerClasses
             }
         }
 
+        /// <summary>
+        /// Appends a message indicating no ride is scheduled.
+        /// </summary>
         private void AppendNoVehicleMessage()
         {
             _detailsTextBox.SelectionFont = new Font(_detailsTextBox.Font, FontStyle.Bold);
@@ -429,6 +487,9 @@ namespace RideMatchProject.PassengerClasses
             _detailsTextBox.AppendText("Please check back tomorrow morning for your ride details.\n");
         }
 
+        /// <summary>
+        /// Displays a message indicating no passenger profile exists.
+        /// </summary>
         public void ShowNoProfileMessage()
         {
             InvokeOnUIThread(() => {
@@ -438,6 +499,10 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Displays an error message in a message box.
+        /// </summary>
+        /// <param name="message">The error message to display.</param>
         public void ShowErrorMessage(string message)
         {
             InvokeOnUIThread(() => {
@@ -445,6 +510,10 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Displays a message confirming the pickup location update.
+        /// </summary>
+        /// <param name="address">The updated address.</param>
         public void ShowLocationUpdatedMessage(string address)
         {
             InvokeOnUIThread(() => {
@@ -453,6 +522,9 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Displays a message confirming the ride request submission.
+        /// </summary>
         public void ShowRideRequestMessage()
         {
             InvokeOnUIThread(() => {
@@ -461,15 +533,17 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Updates the availability checkbox and related UI elements.
+        /// </summary>
+        /// <param name="isAvailable">The new availability state.</param>
         public void UpdateAvailabilityControl(bool isAvailable)
         {
             InvokeOnUIThread(() => {
-                // Remove event handler temporarily to avoid triggering events during update
                 _availabilityCheckBox.CheckedChanged -= AvailabilityCheckBox_CheckedChanged;
 
                 _availabilityCheckBox.Checked = isAvailable;
 
-                // Update location section based on new state
                 if (isAvailable)
                 {
                     if (!HasLocationSection())
@@ -482,11 +556,14 @@ namespace RideMatchProject.PassengerClasses
                     RemoveLocationSection();
                 }
 
-                // Reattach event handler
                 _availabilityCheckBox.CheckedChanged += AvailabilityCheckBox_CheckedChanged;
             });
         }
 
+        /// <summary>
+        /// Shows or hides the location selection instructions label.
+        /// </summary>
+        /// <param name="visible">Whether the instructions should be visible.</param>
         public void ShowLocationSelectionInstructions(bool visible)
         {
             InvokeOnUIThread(() => {
@@ -497,6 +574,10 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Enables or disables the address search controls.
+        /// </summary>
+        /// <param name="enabled">Whether the controls should be enabled.</param>
         public void SetSearchControlsEnabled(bool enabled)
         {
             InvokeOnUIThread(() => {
@@ -514,6 +595,10 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Sets the form's cursor to indicate a busy or normal state.
+        /// </summary>
+        /// <param name="busy">Whether the busy state should be shown.</param>
         public void ShowBusyState(bool busy)
         {
             InvokeOnUIThread(() => {
@@ -521,14 +606,19 @@ namespace RideMatchProject.PassengerClasses
             });
         }
 
+        /// <summary>
+        /// Gets the map control instance.
+        /// </summary>
+        /// <returns>The GMapControl instance.</returns>
         public GMapControl GetMapControl()
         {
             return _mapControl;
         }
 
         /// <summary>
-        /// Ensures that the provided action runs on the UI thread
+        /// Ensures that the provided action runs on the UI thread.
         /// </summary>
+        /// <param name="action">The action to execute.</param>
         private void InvokeOnUIThread(Action action)
         {
             if (_parentForm.InvokeRequired)

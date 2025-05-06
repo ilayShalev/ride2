@@ -8,7 +8,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using RideMatchProject.Services.DatabaseServiceClasses;
@@ -16,7 +15,8 @@ using RideMatchProject.Services.DatabaseServiceClasses;
 namespace RideMatchProject.AdminClasses
 {
     /// <summary>
-    /// Controller for the Routes tab
+    /// Controller for the Routes tab in the admin interface, responsible for managing route visualization,
+    /// loading routes for a selected date, and displaying route details on a map and list view.
     /// </summary>
     public class RoutesTabController : TabControllerBase
     {
@@ -29,6 +29,12 @@ namespace RideMatchProject.AdminClasses
         private Solution _currentSolution;
         private RoutingService _routingService;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RoutesTabController"/> class.
+        /// </summary>
+        /// <param name="dbService">The database service used to retrieve route and solution data.</param>
+        /// <param name="mapService">The map service used to initialize and manage the GMap control.</param>
+        /// <param name="dataManager">The data manager responsible for handling admin-related data operations.</param>
         public RoutesTabController(
             DatabaseService dbService,
             MapService mapService,
@@ -36,13 +42,21 @@ namespace RideMatchProject.AdminClasses
             : base(dbService, mapService, dataManager)
         {
         }
+
+        /// <summary>
+        /// Initializes the Routes tab by creating and adding UI controls such as date selection and routes panel.
+        /// </summary>
+        /// <param name="tabPage">The <see cref="TabPage"/> to which the controls will be added.</param>
         public override void InitializeTab(TabPage tabPage)
         {
             CreateDateSelectionControls(tabPage);
             CreateRoutesPanel(tabPage);
         }
 
-
+        /// <summary>
+        /// Creates and configures date selection controls (label, date picker, and load button) for the Routes tab.
+        /// </summary>
+        /// <param name="tabPage">The <see cref="TabPage"/> where the controls will be placed.</param>
         private void CreateDateSelectionControls(TabPage tabPage)
         {
             // Date selector label
@@ -70,14 +84,16 @@ namespace RideMatchProject.AdminClasses
                 LoadButtonClick
             );
 
-
-
             // Add controls to tab
             tabPage.Controls.Add(dateLabel);
             tabPage.Controls.Add(_dateSelector);
             tabPage.Controls.Add(_loadButton);
         }
 
+        /// <summary>
+        /// Creates and configures the routes panel, including the map control, routes list view, and route details text box.
+        /// </summary>
+        /// <param name="tabPage">The <see cref="TabPage"/> where the panel will be placed.</param>
         private void CreateRoutesPanel(TabPage tabPage)
         {
             // Main panel
@@ -133,6 +149,11 @@ namespace RideMatchProject.AdminClasses
             tabPage.Controls.Add(routesPanel);
         }
 
+        /// <summary>
+        /// Handles the click event of the Load Routes button, loading routes for the selected date.
+        /// </summary>
+        /// <param name="sender">The source of the event (the button).</param>
+        /// <param name="e">The event arguments.</param>
         private async void LoadButtonClick(object sender, EventArgs e)
         {
             _loadButton.Enabled = false;
@@ -187,6 +208,12 @@ namespace RideMatchProject.AdminClasses
                 _loadButton.Text = "Load Routes";
             }
         }
+
+        /// <summary>
+        /// Handles the selection change event in the routes list view, displaying details for the selected route.
+        /// </summary>
+        /// <param name="sender">The source of the event (the list view).</param>
+        /// <param name="e">The event arguments.</param>
         private void RoutesListView_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (_routesListView.SelectedItems.Count > 0)
@@ -212,6 +239,11 @@ namespace RideMatchProject.AdminClasses
             }
         }
 
+        /// <summary>
+        /// Displays detailed route information for a specific vehicle in the route details text box, including Google routing data.
+        /// </summary>
+        /// <param name="vehicle">The <see cref="Vehicle"/> for which to display details.</param>
+        /// <param name="routeDetail">The <see cref="RouteDetails"/> containing Google routing information.</param>
         private void DisplayDetailedRouteForVehicle(Vehicle vehicle, RouteDetails routeDetail)
         {
             _routeDetailsTextBox.Clear();
@@ -281,6 +313,12 @@ namespace RideMatchProject.AdminClasses
             }
         }
 
+        /// <summary>
+        /// Loads and displays routes for the specified date, including map visualization and list view population.
+        /// </summary>
+        /// <param name="date">The date for which to load routes.</param>
+        /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
+        /// <exception cref="Exception">Thrown if an error occurs while loading routes or fetching Google routes.</exception>
         private async Task LoadRoutesForDateAsync(DateTime date)
         {
             try
@@ -319,7 +357,7 @@ namespace RideMatchProject.AdminClasses
                 // Display routes on map using data from database
                 _routingService.DisplaySolutionOnMap(_mapControl, _currentSolution);
 
-                // Now automatically get Google Routes without requiring button press
+                // Automatically fetch Google Routes
                 try
                 {
                     await _routingService.GetGoogleRoutesAsync(_mapControl, _currentSolution);
@@ -328,7 +366,7 @@ namespace RideMatchProject.AdminClasses
                 }
                 catch (Exception ex)
                 {
-                    // Just log the error but continue - we still have the basic routes displayed
+                    // Log the error but continue with basic routes
                     Console.WriteLine($"Error fetching Google routes: {ex.Message}");
                 }
 
@@ -343,6 +381,13 @@ namespace RideMatchProject.AdminClasses
                 );
             }
         }
+
+        /// <summary>
+        /// Retrieves the route ID for the specified date from the database.
+        /// </summary>
+        /// <param name="date">The date in "yyyy-MM-dd" format.</param>
+        /// <returns>The route ID, or 0 if no route is found.</returns>
+        /// <exception cref="Exception">Thrown if an error occurs during database access.</exception>
         private async Task<int> GetRouteIdForDateAsync(string date)
         {
             var parameters = new Dictionary<string, object> { { "@SolutionDate", date } };
@@ -354,18 +399,21 @@ namespace RideMatchProject.AdminClasses
             ORDER BY GeneratedTime DESC 
             LIMIT 1";
 
-            // Correct way to call this - use the appropriate service method instead
             return await DbService.GetScalarValueAsync<int>(query, parameters);
         }
 
-
+        /// <summary>
+        /// Loads route path points for each vehicle in the solution from the database.
+        /// </summary>
+        /// <param name="solution">The <see cref="Solution"/> containing vehicles to load paths for.</param>
+        /// <param name="routeId">The ID of the route to load paths for.</param>
+        /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
         private async Task LoadRoutePaths(Solution solution, int routeId)
         {
             foreach (var vehicle in solution.Vehicles)
             {
                 try
                 {
-
                     int routeDetailId = await DbService.GetRouteDetailIdForVehicleAsync(vehicle.Id, routeId);
                     if (routeDetailId > 0)
                     {
@@ -383,6 +431,11 @@ namespace RideMatchProject.AdminClasses
                 }
             }
         }
+
+        /// <summary>
+        /// Displays passenger markers on the map for the given solution.
+        /// </summary>
+        /// <param name="solution">The <see cref="Solution"/> containing vehicles and their assigned passengers.</param>
         private void DisplayPassengersOnMap(Solution solution)
         {
             var passengersOverlay = new GMapOverlay("passengers");
@@ -404,6 +457,10 @@ namespace RideMatchProject.AdminClasses
             _mapControl.Overlays.Add(passengersOverlay);
         }
 
+        /// <summary>
+        /// Populates the routes list view with vehicle route information from the solution.
+        /// </summary>
+        /// <param name="solution">The <see cref="Solution"/> containing vehicles to display.</param>
         private void DisplayRoutesInListView(Solution solution)
         {
             _routesListView.Items.Clear();
@@ -423,6 +480,10 @@ namespace RideMatchProject.AdminClasses
             }
         }
 
+        /// <summary>
+        /// Displays simplified route details for a specific vehicle in the route details text box.
+        /// </summary>
+        /// <param name="vehicleId">The ID of the vehicle to display details for.</param>
         private void DisplayRouteDetails(int vehicleId)
         {
             if (_currentSolution == null)
@@ -439,6 +500,9 @@ namespace RideMatchProject.AdminClasses
             RouteDetailsFormatter.DisplayRouteDetails(_routeDetailsTextBox, vehicle);
         }
 
+        /// <summary>
+        /// Updates the route details text box with detailed route information, or a message if no details are available.
+        /// </summary>
         private void UpdateRouteDetailsDisplay()
         {
             if (_routingService == null || _routingService.VehicleRouteDetails.Count == 0)
@@ -457,6 +521,10 @@ namespace RideMatchProject.AdminClasses
             );
         }
 
+        /// <summary>
+        /// Refreshes the Routes tab by reloading routes for the currently selected date.
+        /// </summary>
+        /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
         public override async Task RefreshTabAsync()
         {
             if (_currentSolution != null)
