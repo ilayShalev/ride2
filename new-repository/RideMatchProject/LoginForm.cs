@@ -11,24 +11,30 @@ namespace RideMatchProject
 {
     public partial class LoginForm : Form
     {
+        // Dependency to handle user authentication and database interaction
         private readonly DatabaseService _dbService;
+
+        // UI controls
         private TextBox _usernameTextBox;
         private TextBox _passwordTextBox;
         private Button _loginButton;
         private LinkLabel _registerLinkLabel;
         private Label _statusLabel;
 
+        // Properties to hold authenticated user information
         public int UserId { get; private set; }
         public string UserType { get; private set; }
         public string Username { get; private set; }
 
+        // Constructor
         public LoginForm(DatabaseService dbService)
         {
             _dbService = dbService;
             InitializeComponent();
-            SetupUI();
+            SetupUI(); // Setup all visual components
         }
 
+        // Creates all visual components of the login form
         private void SetupUI()
         {
             AddTitleLabel();
@@ -38,10 +44,11 @@ namespace RideMatchProject
             AddRegistrationLink();
             AddStatusLabel();
 
-            // Set enter key to trigger login
+            // Allows pressing Enter to trigger the login button
             AcceptButton = _loginButton;
         }
 
+        // Adds the form title label
         private void AddTitleLabel()
         {
             var titleLabel = LoginControlFactory.CreateLabel(
@@ -54,6 +61,7 @@ namespace RideMatchProject
             Controls.Add(titleLabel);
         }
 
+        // Adds the username field and label
         private void AddUsernameField()
         {
             Controls.Add(LoginControlFactory.CreateLabel("Username:", new Point(50, 80), new Size(100, 20)));
@@ -61,14 +69,16 @@ namespace RideMatchProject
             Controls.Add(_usernameTextBox);
         }
 
+        // Adds the password field and label
         private void AddPasswordField()
         {
             Controls.Add(LoginControlFactory.CreateLabel("Password:", new Point(50, 110), new Size(100, 20)));
             _passwordTextBox = LoginControlFactory.CreateTextBox(new Point(150, 110), new Size(200, 20));
-            _passwordTextBox.PasswordChar = '*';
+            _passwordTextBox.PasswordChar = '*'; // Hide characters
             Controls.Add(_passwordTextBox);
         }
 
+        // Adds the login button and sets the login action
         private void AddLoginButton()
         {
             _loginButton = LoginControlFactory.CreateButton(
@@ -80,6 +90,7 @@ namespace RideMatchProject
             Controls.Add(_loginButton);
         }
 
+        // Adds a link to open the registration form
         private void AddRegistrationLink()
         {
             _registerLinkLabel = new LinkLabel
@@ -93,6 +104,7 @@ namespace RideMatchProject
             Controls.Add(_registerLinkLabel);
         }
 
+        // Adds a status label for displaying errors or status messages
         private void AddStatusLabel()
         {
             _statusLabel = LoginControlFactory.CreateLabel(
@@ -106,19 +118,22 @@ namespace RideMatchProject
             Controls.Add(_statusLabel);
         }
 
+        // Handles the login process
         private async Task LoginAsync()
         {
-            _loginButton.Enabled = false;
+            _loginButton.Enabled = false; // Disable to prevent multiple clicks
             _statusLabel.Text = "Logging in...";
 
             try
             {
+                // Check if username or password is missing
                 if (AreCredentialsEmpty())
                 {
                     _statusLabel.Text = "Please enter both username and password.";
                     return;
                 }
 
+                // Proceed with authentication
                 await AuthenticateUser();
             }
             catch (Exception ex)
@@ -127,26 +142,29 @@ namespace RideMatchProject
             }
             finally
             {
-                _loginButton.Enabled = true;
+                _loginButton.Enabled = true; // Re-enable the button
             }
         }
 
+        // Checks if either username or password fields are empty
         private bool AreCredentialsEmpty()
         {
             return string.IsNullOrWhiteSpace(_usernameTextBox.Text) ||
                    string.IsNullOrWhiteSpace(_passwordTextBox.Text);
         }
 
+        // Authenticates the user using the database service
         private async Task AuthenticateUser()
         {
             var result = await _dbService.AuthenticateUserAsync(_usernameTextBox.Text, _passwordTextBox.Text);
 
             if (result.Success)
             {
+                // Save user info for later use
                 UserId = result.UserId;
                 UserType = result.UserType;
                 Username = _usernameTextBox.Text;
-                CloseWithSuccess();
+                CloseWithSuccess(); // Close form on success
             }
             else
             {
@@ -154,12 +172,14 @@ namespace RideMatchProject
             }
         }
 
+        // Closes the login form with OK result
         private void CloseWithSuccess()
         {
             DialogResult = DialogResult.OK;
             Close();
         }
 
+        // Opens the registration form and pre-fills username after successful registration
         private void ShowRegistrationForm()
         {
             using (var regForm = new RegistrationForm(_dbService))
@@ -172,16 +192,14 @@ namespace RideMatchProject
             }
         }
 
+        // Optional form load event handler (currently unused)
         private void LoginForm_Load(object sender, EventArgs e)
         {
             // Initialization code for LoginForm
         }
     }
 
- 
-
-  
-
+    // Enum to identify different field types (used in registration form)
     public enum FieldType
     {
         Username,
@@ -191,8 +209,4 @@ namespace RideMatchProject
         Email,
         Phone
     }
-
-
-
-  
 }

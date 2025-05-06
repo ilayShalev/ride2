@@ -15,17 +15,27 @@ using RideMatchProject.DriverClasses;
 namespace RideMatchProject
 {
     /// <summary>
-    /// Main form for driver interface with proper thread handling
+    /// Main form for driver interface. Handles UI setup, map visualization, and background data loading.
     /// </summary>
     public partial class DriverForm : Form
     {
+        // Core driver-related services
         private DriverDataManager _dataManager;
         private DriverUIManager _uiManager;
         private DriverMapManager _mapManager;
         private DriverLocationManager _locationManager;
+
+        // Readonly user information
         private readonly int _userId;
         private readonly string _username;
 
+        /// <summary>
+        /// Initializes the driver form and injects shared services
+        /// </summary>
+        /// <param name="dbService">Database service for data access</param>
+        /// <param name="mapService">Map service for routing/coordinates</param>
+        /// <param name="userId">Logged-in driver's ID</param>
+        /// <param name="username">Logged-in driver's name</param>
         public DriverForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
             ValidateArguments(dbService, mapService, username);
@@ -33,10 +43,14 @@ namespace RideMatchProject
             _userId = userId;
             _username = username;
 
-            InitializeComponent();
-            InitializeManagers(dbService, mapService);
+            InitializeComponent(); // Initialize WinForms controls
+
+            InitializeManagers(dbService, mapService); // Set up core logic managers
         }
 
+        /// <summary>
+        /// Validates constructor arguments before using them
+        /// </summary>
         private void ValidateArguments(DatabaseService dbService, MapService mapService, string username)
         {
             if (dbService == null) throw new ArgumentNullException(nameof(dbService));
@@ -44,6 +58,9 @@ namespace RideMatchProject
             if (string.IsNullOrEmpty(username)) throw new ArgumentNullException(nameof(username));
         }
 
+        /// <summary>
+        /// Initializes the core logic managers that control data, map, UI and location tracking
+        /// </summary>
         private void InitializeManagers(DatabaseService dbService, MapService mapService)
         {
             _dataManager = new DriverDataManager(dbService, _userId, _username);
@@ -52,19 +69,19 @@ namespace RideMatchProject
             _uiManager = new DriverUIManager(this, _dataManager, _mapManager, _locationManager, _username);
         }
 
+        /// <summary>
+        /// Called when the form is loaded. Initializes UI and loads data asynchronously.
+        /// </summary>
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
 
             try
             {
-                // Initialize UI components on the UI thread
-                _uiManager.InitializeUI();
+                _uiManager.InitializeUI(); // Sets up UI controls and labels
+                _mapManager.InitializeMap(_uiManager.MapControl, 32.0741, 34.7922); // Center the map on a default location (e.g., Tel Aviv)
 
-                // Initialize map (this is done on the UI thread by the manager)
-                _mapManager.InitializeMap(_uiManager.MapControl, 32.0741, 34.7922);
-
-                // Use our thread-safe task runner to load data
+                // Load data safely on a background thread and update UI after
                 ThreadUtils.SafeTaskRun(
                     async () => await LoadDataAndRefreshUI(),
                     ex => HandleLoadingError(ex)
@@ -78,12 +95,18 @@ namespace RideMatchProject
             }
         }
 
-        // Required by the designer
+        /// <summary>
+        /// Placeholder for designer-required form load event.
+        /// All initialization is done in OnLoad.
+        /// </summary>
         private void DriverForm_Load(object sender, EventArgs e)
         {
-            // Implementation is in OnLoad override
+            // Do nothing. Designer will call this automatically.
         }
 
+        /// <summary>
+        /// Handles errors that occur during async loading of driver data
+        /// </summary>
         private void HandleLoadingError(Exception ex)
         {
             ThreadUtils.ShowErrorMessage(this,
@@ -91,21 +114,26 @@ namespace RideMatchProject
                 "Loading Error");
         }
 
+        /// <summary>
+        /// Loads driver's assigned passengers, vehicle data and updates the map
+        /// </summary>
         private async Task LoadDataAndRefreshUI()
         {
-            await _dataManager.LoadDriverDataAsync();
+            await _dataManager.LoadDriverDataAsync(); // Load from DB or cache
 
-            // UI updates are handled on the UI thread within these methods
-            _uiManager.RefreshUI();
+            _uiManager.RefreshUI(); // Update UI elements (list of passengers, status, etc.)
+
+            // Draw the route on the map based on assigned passengers
             await _mapManager.DisplayRouteOnMapAsync(_dataManager.Vehicle, _dataManager.AssignedPassengers);
         }
 
-        // Ensure cleanup on form close
+        /// <summary>
+        /// Called when the form is closed. Releases any resources if necessary.
+        /// </summary>
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             base.OnFormClosed(e);
-
-            // Clean up any resources or event handlers if needed
+            // Add disposal or cleanup here if needed in the future
         }
     }
 }

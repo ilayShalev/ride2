@@ -19,116 +19,107 @@ namespace RideMatchProject
     /// </summary>
     public partial class PassengerForm : Form
     {
-        // Core components
+        // Core logic components
         private PassengerController _controller;
         private PassengerUIManager _uiManager;
         private PassengerDataAccessLayer _dataLayer;
         private MapVisualizer _mapVisualizer;
 
-        // Store dependencies for designer support
+        // User data
         private readonly int _userId;
         private readonly string _username;
 
         /// <summary>
         /// Constructor for the passenger form
         /// </summary>
+        /// <param name="dbService">Shared database service</param>
+        /// <param name="mapService">Shared map service for routing and visualization</param>
+        /// <param name="userId">Current user's ID</param>
+        /// <param name="username">Current user's name</param>
         public PassengerForm(DatabaseService dbService, MapService mapService, int userId, string username)
         {
             _userId = userId;
             _username = username;
 
-            // Call the designer's InitializeComponent method
-            InitializeComponent();
+            InitializeComponent(); // Initializes all controls defined in the designer
 
-            InitializeServices(dbService, mapService);
-            ConfigureForm();
-            SubscribeToEvents();
+            InitializeServices(dbService, mapService); // Inject dependencies and create logic components
+            ConfigureForm();                            // Basic form setup: size, title, etc.
+            SubscribeToEvents();                        // Attach event handlers
         }
 
         /// <summary>
-        /// Set up all services and dependencies
+        /// Initializes internal services and wiring between UI, map and logic
         /// </summary>
         private void InitializeServices(DatabaseService dbService, MapService mapService)
         {
-            // Create UI components first
+            // Create and configure the UI manager first
             _uiManager = new PassengerUIManager(this, _username);
 
-            // Set up data access
+            // Connect data access layer for retrieving and updating ride info
             _dataLayer = new PassengerDataAccessLayer(dbService, _userId, _username);
 
-            // Set up map visualization
+            // Initialize map rendering and interaction features
             _mapVisualizer = new MapVisualizer(mapService, dbService, _uiManager.GetMapControl());
 
-            // Create the controller last, injecting all dependencies
+            // Central controller coordinating between UI, map, and data
             _controller = new PassengerController(_dataLayer, _mapVisualizer, _uiManager);
         }
 
         /// <summary>
-        /// Configure form appearance
+        /// Sets form appearance and fixed window behavior
         /// </summary>
         private void ConfigureForm()
         {
-            Size = new Size(1000, 700);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            Size = new Size(1000, 700); // Fixed window size
+            FormBorderStyle = FormBorderStyle.FixedDialog; // User cannot resize
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "Passenger Dashboard";
+            Text = "Passenger Dashboard"; // Title bar text
         }
 
         /// <summary>
-        /// Subscribe to form events
+        /// Subscribes internal methods to form events (besides designer events)
         /// </summary>
         private void SubscribeToEvents()
         {
-            // Simply add our event handler - the designer's handlers will also run
             Load += OnFormLoad;
         }
 
         /// <summary>
-        /// Handle form load event
+        /// Executed when form is loaded — triggers initialization logic in controller
         /// </summary>
         private async void OnFormLoad(object sender, EventArgs e)
         {
             try
             {
-                // Run directly on UI thread to avoid cross-thread errors
-                await _controller.InitializeAsync();
+                await _controller.InitializeAsync(); // Load data, populate UI, etc.
             }
             catch (Exception ex)
             {
+                // Inform the user about initialization failure
                 MessageBox.Show($"Error loading data: {ex.Message}",
                     "Initialization Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         /// <summary>
-        /// Event handler required by the designer
+        /// Dummy handler to satisfy designer-generated call — routes to main logic
         /// </summary>
         public void PassengerForm_Load(object sender, EventArgs e)
         {
-            // Call our implementation method
             OnFormLoad(sender, e);
         }
 
-        // Do not implement InitializeComponent - it's generated by the designer
+        // Note: InitializeComponent() is automatically generated by the Windows Forms Designer.
     }
 
-
-
-
-
- 
-
     /// <summary>
-    /// Custom exception for data operations
+    /// Custom exception class used to represent data access failures or inconsistencies
     /// </summary>
     public class DataException : Exception
     {
-        public DataException(string message) : base(message)
-        {
-        }
+        public DataException(string message) : base(message) { }
 
-        public DataException(string message, Exception innerException) : base(message, innerException)
-        {
-        }
+        public DataException(string message, Exception innerException) : base(message, innerException) { }
     }
 }

@@ -16,7 +16,6 @@ namespace RideMatchProject.AdminClasses
     {
         private CheckBox _enabledCheckBox;
         private DateTimePicker _timeSelector;
-        private CheckBox _useGoogleApiCheckBox;
         private ListView _historyListView;
         private Button _saveButton;
         private Button _runNowButton;
@@ -72,15 +71,7 @@ namespace RideMatchProject.AdminClasses
             // Create buttons
             CreateActionButtons(panel);
 
-            // Google API setting
-            _useGoogleApiCheckBox = AdminUIFactory.CreateCheckBox(
-                "Have good Internet (use API)",
-                new Point(20, 140),
-                new Size(270, 20),
-                true
-            );
-            _useGoogleApiCheckBox.CheckedChanged += UseGoogleApiCheckBox_CheckedChanged;
-            panel.Controls.Add(_useGoogleApiCheckBox);
+ 
 
             // History section
             CreateHistorySection(panel);
@@ -163,10 +154,7 @@ namespace RideMatchProject.AdminClasses
             }
         }
 
-        private async void UseGoogleApiCheckBox_CheckedChanged(object sender, EventArgs e)
-        {
-            await SaveGoogleApiSettingAsync();
-        }
+
 
         private async void RefreshHistoryButtonClick(object sender, EventArgs e)
         {
@@ -204,29 +192,7 @@ namespace RideMatchProject.AdminClasses
             }
         }
 
-        private async Task SaveGoogleApiSettingAsync()
-        {
-            try
-            {
-                await DbService.SaveSettingAsync(
-                    "UseGoogleRoutesAPI",
-                    _useGoogleApiCheckBox.Checked ? "1" : "0"
-                );
 
-                string message = _useGoogleApiCheckBox.Checked
-                    ? "The scheduler will now use Google Routes API for all routes"
-                    : "The scheduler will use estimated routes (no API calls)";
-
-                MessageDisplayer.ShowInfo(message, "Setting Saved");
-            }
-            catch (Exception ex)
-            {
-                MessageDisplayer.ShowError(
-                    $"Error saving setting: {ex.Message}",
-                    "Save Error"
-                );
-            }
-        }
 
         private async Task RunSchedulerAsync()
         {
@@ -340,7 +306,6 @@ namespace RideMatchProject.AdminClasses
 
                 // Load Google API setting
                 var useGoogleApi = await DbService.GetSettingAsync("UseGoogleRoutesAPI", "1");
-                _useGoogleApiCheckBox.Checked = useGoogleApi == "1";
 
                 // Refresh history
                 await RefreshHistoryListView();

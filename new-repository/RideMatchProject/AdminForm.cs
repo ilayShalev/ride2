@@ -14,29 +14,36 @@ using GMap.NET.WindowsForms;
 namespace RideMatchProject
 {
     /// <summary>
-    /// Main administrative interface for the RideMatch application
+    /// Main administrative interface for the RideMatch application.
+    /// Responsible for initializing UI, loading destination data, and controlling tabs.
     /// </summary>
     public partial class AdminForm : Form
     {
+        // Core backend services
         private readonly DatabaseService _dbService;
         private readonly MapService _mapService;
+
+        // Logic and algorithm components
         private RoutingService _routingService;
         private RideSharingGenetic _algorithmService;
 
-        // Core UI components
+        // UI components
         private TabControl _tabControl;
         private TabFactory _tabFactory;
 
-        // Current solution being viewed
+        // Current solution state
         private Solution _currentSolution;
 
-        // Destination information
+        // Destination details for the day
         private double _destinationLat;
         private double _destinationLng;
         private string _destinationName;
         private string _destinationAddress;
         private string _destinationTargetTime;
 
+        /// <summary>
+        /// Constructs the AdminForm and initializes services.
+        /// </summary>
         public AdminForm(DatabaseService dbService, MapService mapService)
         {
             _dbService = dbService;
@@ -45,16 +52,22 @@ namespace RideMatchProject
             InitializeComponent();
             InitializeAdminInterface();
 
-            // Add the Load event handler
+            // Hook Load event
             this.Load += AdminForm_Load;
         }
 
+        /// <summary>
+        /// On form load, begin loading destination and data in background.
+        /// </summary>
         private void AdminForm_Load(object sender, EventArgs e)
         {
-            // Call the async method without awaiting
+            // Run loading logic asynchronously to keep UI responsive
             Task.Run(LoadDestinationAndDataAsync);
         }
 
+        /// <summary>
+        /// Sets up the form's UI structure and tabs.
+        /// </summary>
         private void InitializeAdminInterface()
         {
             Text = "RideMatch - Administrator Interface";
@@ -69,16 +82,18 @@ namespace RideMatchProject
             };
             Controls.Add(_tabControl);
 
-            // Initialize factory and tab controllers
+            // Initialize tab factory to handle content creation
             _tabFactory = new TabFactory(_dbService, _mapService);
 
-            // Create and add all tabs
+            // Create and register all system tabs
             CreateAndAddAllTabs();
         }
 
+        /// <summary>
+        /// Creates and adds all functional tabs to the interface.
+        /// </summary>
         private void CreateAndAddAllTabs()
         {
-            // Create all tab pages using the factory
             var usersTabPage = _tabFactory.CreateUsersTab();
             var driversTabPage = _tabFactory.CreateDriversTab();
             var passengersTabPage = _tabFactory.CreatePassengersTab();
@@ -86,8 +101,8 @@ namespace RideMatchProject
             var destinationTabPage = _tabFactory.CreateDestinationTab();
             var schedulingTabPage = _tabFactory.CreateSchedulingTab();
 
-            // Add all tabs to the control
-            _tabControl.TabPages.AddRange(new TabPage[] {
+            _tabControl.TabPages.AddRange(new TabPage[]
+            {
                 usersTabPage,
                 driversTabPage,
                 passengersTabPage,
@@ -96,14 +111,18 @@ namespace RideMatchProject
                 schedulingTabPage
             });
 
-            // Configure tab selection behavior
+            // Register handler to refresh tab when changed
             _tabControl.SelectedIndexChanged += TabSelectionChanged;
         }
 
+        /// <summary>
+        /// Loads the current destination and initializes services/tabs accordingly.
+        /// </summary>
         private async Task LoadDestinationAndDataAsync()
         {
             try
             {
+                // Retrieve current destination information
                 var dest = await _dbService.GetDestinationAsync();
                 _destinationLat = dest.Latitude;
                 _destinationLng = dest.Longitude;
@@ -111,19 +130,20 @@ namespace RideMatchProject
                 _destinationAddress = dest.Address;
                 _destinationTargetTime = dest.TargetTime;
 
-                // Initialize routing service with destination coordinates and target time
+                // Initialize routing logic with retrieved destination
                 _routingService = new RoutingService(
                     _mapService,
                     _destinationLat,
                     _destinationLng,
-                    _destinationTargetTime // Pass the target time
+                    _destinationTargetTime
                 );
 
-                // Load initial data
+                // Trigger async loading for each tab's data
                 await _tabFactory.LoadAllDataAsync();
             }
             catch (Exception ex)
             {
+                // Ensure exception message is shown on the UI thread
                 if (this.IsHandleCreated)
                 {
                     this.Invoke((Action)(() => {
@@ -132,39 +152,28 @@ namespace RideMatchProject
                 }
             }
         }
+
+        /// <summary>
+        /// Refreshes the selected tab when user switches between them.
+        /// </summary>
         private void TabSelectionChanged(object sender, EventArgs e)
         {
             var selectedTab = _tabControl.SelectedTab;
+            if (selectedTab == null) return;
 
-            if (selectedTab == null)
-            {
-                return;
-            }
-
-            // Delegate to the tab factory to refresh the selected tab
+            // Use utility to safely run async refresh on the selected tab
             TaskManager.ExecuteAsync(() => _tabFactory.RefreshTabAsync(selectedTab));
         }
     }
 
-  
-  
-
-  
-
-
- 
- 
-
-  
- 
-
- 
-
     /// <summary>
-    /// Utility class for async task execution
+    /// Utility class for async task execution with error display
     /// </summary>
     public static class TaskManager
     {
+        /// <summary>
+        /// Executes an async task with built-in error handling
+        /// </summary>
         public static async void ExecuteAsync(Func<Task> action)
         {
             try

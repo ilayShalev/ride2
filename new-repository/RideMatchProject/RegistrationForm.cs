@@ -9,20 +9,28 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using RideMatchProject.LoginClasses;
 
 namespace RideMatchProject
 {
     public partial class RegistrationForm : Form
     {
+        // Reference to the database service for user registration
         private readonly DatabaseService _dbService;
+
+        // Collection to store input fields from the form
         private FormInputCollection _inputs;
+
+        // Register and Cancel buttons
         private Button _registerButton;
         private Button _cancelButton;
+
+        // Label to show status or error messages
         private Label _statusLabel;
 
+        // Property to hold the newly registered username
         public string Username { get; private set; }
 
+        // Constructor: initializes form components and sets up the UI
         public RegistrationForm(DatabaseService dbService)
         {
             _dbService = dbService;
@@ -31,8 +39,7 @@ namespace RideMatchProject
             SetupUI();
         }
 
-
-
+        // Sets up the entire user interface
         private void SetupUI()
         {
             AddTitleLabel();
@@ -40,10 +47,11 @@ namespace RideMatchProject
             AddButtons();
             AddStatusLabel();
 
-            // Set enter key to trigger register
+            // Pressing Enter will trigger the register button
             AcceptButton = _registerButton;
         }
 
+        // Adds the main title label to the form
         private void AddTitleLabel()
         {
             var titleLabel = LoginControlFactory.CreateLabel(
@@ -56,6 +64,7 @@ namespace RideMatchProject
             Controls.Add(titleLabel);
         }
 
+        // Creates all required input fields
         private void CreateInputFields()
         {
             int y = 70;
@@ -63,7 +72,7 @@ namespace RideMatchProject
             int inputWidth = 230;
             int spacing = 30;
 
-            // Create input fields
+            // Create each input field with label
             AddInputField("Username:", ref y, labelWidth, inputWidth, spacing, FieldType.Username);
             AddInputField("Password:", ref y, labelWidth, inputWidth, spacing, FieldType.Password);
             AddInputField("Confirm Password:", ref y, labelWidth, inputWidth, spacing, FieldType.ConfirmPassword);
@@ -71,10 +80,11 @@ namespace RideMatchProject
             AddInputField("Email:", ref y, labelWidth, inputWidth, spacing, FieldType.Email);
             AddInputField("Phone:", ref y, labelWidth, inputWidth, spacing, FieldType.Phone);
 
-            // User Type dropdown
+            // Add user type dropdown (Passenger/Driver)
             AddUserTypeComboBox(y, labelWidth, inputWidth);
         }
 
+        // Helper method to create a single label + textbox field
         private void AddInputField(string label, ref int y, int labelWidth, int inputWidth, int spacing, FieldType fieldType)
         {
             Controls.Add(LoginControlFactory.CreateLabel(label, new Point(50, y), new Size(labelWidth, 20)));
@@ -82,7 +92,7 @@ namespace RideMatchProject
             TextBox textBox = LoginControlFactory.CreateTextBox(new Point(170, y), new Size(inputWidth, 20));
             if (fieldType == FieldType.Password || fieldType == FieldType.ConfirmPassword)
             {
-                textBox.PasswordChar = '*';
+                textBox.PasswordChar = '*'; // Hide password characters
             }
 
             Controls.Add(textBox);
@@ -91,6 +101,7 @@ namespace RideMatchProject
             y += spacing;
         }
 
+        // Adds the user type selection combo box
         private void AddUserTypeComboBox(int y, int labelWidth, int inputWidth)
         {
             Controls.Add(LoginControlFactory.CreateLabel("User Type:", new Point(50, y), new Size(labelWidth, 20)));
@@ -106,6 +117,7 @@ namespace RideMatchProject
             _inputs.UserTypeComboBox = userTypeComboBox;
         }
 
+        // Adds Register and Cancel buttons
         private void AddButtons()
         {
             int y = 280;
@@ -129,6 +141,7 @@ namespace RideMatchProject
             Controls.Add(_cancelButton);
         }
 
+        // Adds a label for status messages (errors/success)
         private void AddStatusLabel()
         {
             _statusLabel = LoginControlFactory.CreateLabel(
@@ -142,6 +155,7 @@ namespace RideMatchProject
             Controls.Add(_statusLabel);
         }
 
+        // Handles the registration process after validation
         private async Task RegisterAsync()
         {
             ValidationResult validationResult = ValidateInput();
@@ -155,9 +169,10 @@ namespace RideMatchProject
             await SubmitRegistration();
         }
 
+        // Validates all inputs before submitting
         private ValidationResult ValidateInput()
         {
-            // Check if all required fields are filled
+            // Check for empty required fields
             if (_inputs.HasEmptyRequiredFields())
             {
                 return new ValidationResult(false, "Please fill in all required fields.");
@@ -178,6 +193,7 @@ namespace RideMatchProject
             return new ValidationResult(true, string.Empty);
         }
 
+        // Submits the registration data to the database
         private async Task SubmitRegistration()
         {
             _registerButton.Enabled = false;
@@ -185,10 +201,10 @@ namespace RideMatchProject
 
             try
             {
-                // Convert user type to database format
+                // Get selected user type (Passenger/Driver)
                 string userType = _inputs.GetSelectedUserType();
 
-                // Add user to database
+                // Add new user to the database
                 int userId = await _dbService.AddUserAsync(
                     _inputs.GetUsername(),
                     _inputs.GetPassword(),
@@ -210,10 +226,12 @@ namespace RideMatchProject
             }
         }
 
+        // Handles the result of the registration attempt
         private void HandleRegistrationResult(int userId)
         {
             if (userId > 0)
             {
+                // Success: store the username and close the form
                 Username = _inputs.GetUsername();
                 DialogResult = DialogResult.OK;
                 Close();
@@ -224,6 +242,7 @@ namespace RideMatchProject
             }
         }
 
+        // Handles any exceptions that occur during registration
         private void HandleRegistrationError(Exception ex)
         {
             if (ex.Message.Contains("UNIQUE"))
@@ -236,9 +255,9 @@ namespace RideMatchProject
             }
         }
 
+        // Form load event (currently unused)
         private void RegistrationForm_Load(object sender, EventArgs e)
         {
-
         }
     }
 }
