@@ -233,6 +233,8 @@ namespace RideMatchProject.Services.AlgoritemClasses
             {
                 if (vehicle == null)
                     continue;
+           
+
 
                 if (vehicle.AssignedPassengers.Count > 0)
                 {

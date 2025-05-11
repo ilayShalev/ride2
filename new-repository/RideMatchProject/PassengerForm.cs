@@ -72,9 +72,11 @@ namespace RideMatchProject
         private void ConfigureForm()
         {
             Size = new Size(1000, 700); // Fixed window size
-            FormBorderStyle = FormBorderStyle.FixedDialog; // User cannot resize
+            FormBorderStyle = FormBorderStyle.Sizable; // User cannot resize
             StartPosition = FormStartPosition.CenterScreen;
             Text = "Passenger Dashboard"; // Title bar text
+
+
         }
 
         /// <summary>

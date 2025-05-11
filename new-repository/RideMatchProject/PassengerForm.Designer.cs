@@ -35,8 +35,10 @@
             this.ClientSize = new System.Drawing.Size(1000, 700);
             this.Name = "PassengerForm";
             this.Text = "RideMatch - Passenger Interface";
+            this.MaximizedBoundsChanged += new System.EventHandler(this.OnFormLoad);
             this.Load += new System.EventHandler(this.PassengerForm_Load);
             this.ResumeLayout(false);
+
         }
 
         #endregion

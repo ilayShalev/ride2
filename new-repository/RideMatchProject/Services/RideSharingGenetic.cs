@@ -4,6 +4,7 @@ using System.Linq;
 using RideMatchProject.Models;
 using RideMatchProject.Utilities;
 using RideMatchProject.Services.AlgoritemClasses;
+using RideMatchProject.AdminClasses;
 
 namespace RideMatchProject.Services
 {
@@ -84,11 +85,16 @@ namespace RideMatchProject.Services
         public Solution Solve(int generations, List<Solution> initialPopulation = null)
         {
             ValidateInputs();
-            InitializePopulation(initialPopulation);
-            RunGeneticAlgorithm(generations);
-            FinalizeResults();
+            if(!_hasCapacityIssue)
+            {
+                InitializePopulation(initialPopulation);
+                RunGeneticAlgorithm(generations);
+                FinalizeResults();
 
-            return _bestSolution;
+                return _bestSolution;
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -111,8 +117,16 @@ namespace RideMatchProject.Services
             if (totalCapacity < _problemData.Passengers.Count)
             {
                 Console.WriteLine($"Warning: Total vehicle capacity ({totalCapacity}) is less than passenger count ({_problemData.Passengers.Count})");
+                MessageDisplayer.ShowError(
+                    $"capacity issue",
+                    "Error running scheduler:"
+                );
+
                 _hasCapacityIssue = true;
+                return;
             }
+
+            _hasCapacityIssue = false;
         }
 
         /// <summary>
@@ -294,7 +308,12 @@ namespace RideMatchProject.Services
         /// <returns>True if any vehicle in the solution has more assigned passengers than its capacity; otherwise, false.</returns>
         private bool HasCapacityIssue(Solution solution)
         {
-            return solution.Vehicles.Any(v => v.AssignedPassengers.Count > v.Capacity);
+            foreach(Vehicle v in solution.Vehicles)
+            {
+                if(v.Capacity < v.AssignedPassengers.Count)
+                    return true;    
+            }
+            return false;
         }
 
         /// <summary>
